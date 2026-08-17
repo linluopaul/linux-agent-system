@@ -1,8 +1,16 @@
 # Claude Provider
 
-Prefer high-value reasoning over execution-heavy routine work.
+Claude is the preferred premium specialist for:
 
-Delegate well-specified coding, search, and testing work when a cheaper
-worker is sufficient.
+- architecture consultation
+- difficult diagnosis
+- ambiguity resolution
+- conflict resolution
+- independent HIGH-risk review
 
-Use independent review when required by risk or unresolved uncertainty.
+Prefer high-value reasoning over execution-heavy routine work. For independent review,
+start from the original goal, acceptance criteria, relevant diff or commit, test evidence
+and necessary documentation; do not assume the implementer's reasoning is correct.
+
+Claude may act as Root or Worker when task evidence, capability, availability or provider
+pressure warrants it. These are preferences, not permanent role bindings.

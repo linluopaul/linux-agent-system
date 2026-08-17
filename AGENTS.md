@@ -8,10 +8,13 @@ system on Linux.
 The system is designed around:
 
 - GitHub as the durable system of record
-- Herdr as the execution and communication plane
+- Orca as the primary agent development environment and execution plane
+- Orca-managed Git worktrees for task isolation
+- Orca CLI and Orchestration for agent launch, collaboration and completion tracking
 - Claude, Codex, DeepSeek and future providers as replaceable agents
-- Python Controller as a deterministic control plane
-- independent worktrees for concurrent tasks
+- a thin Python Controller for deterministic policy and external-system coordination
+- Herdr as optional infrastructure for workloads that specifically require detached or
+  persistent long-running terminal sessions
 - tests and evals as the primary verification mechanism
 - multiple Linux nodes without sharing writable working directories
 
@@ -91,6 +94,37 @@ Reserve premium agents for:
 - high-risk independent verification
 
 Provider roles are preferences, not permanent bindings.
+
+The default provider preferences are:
+
+- Codex for the Root role
+- DeepSeek for low-cost, well-scoped implementation, search and testing work
+- Claude for architecture consultation, difficult diagnosis, ambiguity resolution and
+  independent HIGH-risk review
+
+Availability, capability, budget and task evidence may justify another provider.
+
+## Runtime and Controller Boundaries
+
+Use Orca as the default interface for:
+
+- creating and tracking task worktrees
+- launching agent terminals locally or on configured remote environments
+- structured agent messaging, dispatch and completion tracking
+- worktree and terminal status
+
+Use the version-matched Orca guides exposed by the installed CLI before automating Orca
+commands. In an Orca-managed terminal use `orca`; on Linux outside Orca use the executable
+selected by the installed `orca-cli` skill (normally `orca-ide`).
+
+Do not duplicate Orca's deterministic worktree, terminal, messaging or dispatch lifecycle
+inside the Python Controller. The Controller should focus on GitHub task polling and state
+synchronization, risk and budget policy, node scheduling, deterministic tests and evals,
+metrics, human gates, and backup/recovery.
+
+Herdr is not the default execution or communication plane. Use it only when a future
+workload has an explicit requirement for detached or persistent long-running terminal
+sessions that Orca is not intended to own.
 
 ## Risk
 

@@ -1,621 +1,599 @@
 # 多 Agent 开发系统架构
 
-> 版本：v1.0  
-> 日期：2026-08-17  
-> 目标平台：Ubuntu / Linux  
-> 核心设计：Herdr + GitHub + Claude Code + Codex CLI + DeepSeek Harness + Python Controller
+> 版本：v2.0
+> 日期：2026-08-18
+> 目标平台：Ubuntu / Linux
+> 核心设计：Orca + GitHub + 可替换 Agent Provider + Thin Python Controller
+> 运行时基线：编写本版本时已检查 Orca 1.4.184 提供的 version-matched skills；实际命令始终以当前安装版本为准
 
 ---
 
 ## 1. 文档目的
 
-本文档定义一个长期可维护、可迁移、可扩展的多 Agent 开发体系。它的目标不是把每个任务固定成“Architect → Coder → Reviewer”的流水线，而是建立一个：
+本文档定义一个长期可维护、可迁移、可扩展的多 Agent 开发系统。系统不是固定的
+“Architect → Coder → Reviewer”流水线，而是让一个 Root Agent 对任务 outcome
+负责，并根据风险、能力、成本和证据动态组织 Worker、Reviewer 与 specialist。
 
-- 以项目结果和验收标准为中心；
-- Agent 可根据任务动态组织子 Agent；
-- 高价值判断使用高能力/高成本模型；
-- 大量执行工作优先使用低成本模型；
-- 高风险任务由独立模型进行验证；
-- 项目状态、知识、规则与聊天 session 解耦；
-- 可以在多台 Linux 机器之间分布式调度；
-- 可以逐步加入自动化 Controller；
-- 可以持续从失败记录中优化 Agent harness。
+系统必须保持以下不变量：
 
-整个系统应满足一个核心要求：
+- GitHub 是 durable system of record；
+- Orca 是默认的 ADE、执行、隔离、协作和编排平面；
+- 一个 task outcome 只有一个 Root owner；
+- Root / Worker / Reviewer 是动态角色，不与 provider 永久绑定；
+- 风险继续分为 LOW / MEDIUM / HIGH；
+- HIGH 风险必须进行独立 Review；
+- tests / evals 是首要验证机制；
+- 项目知识与任务记忆必须进入 repository / GitHub；
+- 多台 Linux 节点不得共享同一个可写 working directory；
+- human gates、预算上限、并发上限和安全 guardrails 不因工具变化而放宽；
+- Herdr 仅是未来特定持久 terminal workload 的可选基础设施。
 
-> 模型可以换、Harness 可以换、电脑可以换，但项目知识、任务状态、质量门槛和 Git 历史不能依赖某一个模型或某一台机器。
+核心要求：
+
+> 模型可以换，harness 可以换，机器可以换，运行 session 可以消失；项目知识、
+> 任务状态、质量门槛和 Git 历史不能依赖某个模型、某个 terminal 或某台机器。
 
 ---
 
-# 2. 总体架构
+## 2. 总体架构
 
 ```text
                               USER
                                │
-                    Goals / Constraints / Budget
+              Goals / Constraints / Acceptance / Gates
                                │
                  ┌─────────────┴─────────────┐
                  │                           │
           Product Kanban               Platform Kanban
                  │                           │
-                 │                    Platform Steward
-                 │                      Claude Code
-                 │                           │
                  └──────────────┬────────────┘
                                 │
-                       Python Controller
-                 deterministic control plane
+                       GitHub System of Record
+             Issues / PRs / Git / CI / Docs / Policies
+                                │
+                     Thin Python Controller
+       polling / risk+budget / node policy / verify / metrics
+                   human gates / backup+recovery
+                                │
+                    delegates runtime effects to
+                                │
+                              Orca
+     ADE / worktrees / terminals / local+SSH / collaboration
+                  orchestration / completion tracking
                                 │
           ┌─────────────────────┼─────────────────────┐
           │                     │                     │
- Context/Knowledge        Budget/Model Router     Node Scheduler
+     Local Node          Connected/SSH Node      Future Nodes
+   Orca worktrees          Orca worktrees       Orca worktrees
           │                     │                     │
+   Codex / DeepSeek       Claude / Codex         other providers
+       / Claude              / DeepSeek
           └─────────────────────┼─────────────────────┘
                                 │
-                              Herdr
-                   runtime / panes / agents / SSH
-                                │
-          ┌─────────────────────┴─────────────────────┐
-          │                                           │
-     Desktop Node                                Laptop Node
-     local worktrees                             local worktrees
-          │                                           │
-     ┌────┼────┐                                 ┌────┼────┐
-     │    │    │                                 │    │    │
- Claude Codex DeepSeek                        Claude Codex DeepSeek
-     │    │    │                                 │    │    │
-     └────┼────┘                                 └────┼────┘
-          │                                           │
-          └──────────────────┬────────────────────────┘
-                             │
                        Tests / Evals / CI
-                             │
-                       GitHub Repository
-                             │
-                   metrics / traces / history
-                             │
-                      Platform Steward
-                      harness improvement
+                                │
+                       Commits / PR / Issue
+                                │
+                         GitHub durable state
+
+ Optional side path:
+ Herdr → only an explicitly approved detached/persistent terminal workload
 ```
 
----
-
-# 3. 各层职责
-
-## 3.1 User Layer
-
-人的主要职责不是规定每个 Agent 的思考步骤，而是提供：
-
-1. Goal：最终需要达到什么结果。
-2. Constraints：不能做什么、权限边界是什么。
-3. Acceptance Criteria：什么情况算完成。
-4. Budget：高级模型、API、机器资源的大致预算。
-5. Human Gates：哪些高风险动作必须人工批准。
-
-避免为 Agent 手工写死：
-
-- 必须调用几个 subagent；
-- Claude 必须设计；
-- DeepSeek 必须写代码；
-- Codex 必须每次 Review；
-- 每次必须先输出 plan；
-- 每个任务都必须走相同流程。
+Orca runtime state is operational state。GitHub 与 repository artifacts 才是 durable
+state。Controller 负责确定性 policy 和外部系统协调，但不创建另一套 worktree、
+terminal、message 或 dispatch lifecycle。
 
 ---
 
-## 3.2 GitHub：Durable State / System of Record
+## 3. 分层职责
 
-GitHub 负责持久化：
+### 3.1 Human Layer
 
-- 源代码；
-- 文档；
-- Issues；
-- Pull Requests；
-- Git 历史；
-- CI；
-- Project/Kanban；
-- Controller 配置；
-- Agent 规则；
-- Skills；
-- 架构决策。
+人提供：
 
-任何只存在于某个 Agent session 中、但对未来任务仍然重要的知识，都应该逐步晋升到仓库中。
+1. Goal；
+2. Constraints / non-goals；
+3. Acceptance Criteria；
+4. Risk 和 budget 边界；
+5. Human Gates；
+6. production、capital、secret、destructive action 等授权。
+
+人不需要为每个任务固定：
+
+- 必须创建几个 agent；
+- 哪个 provider 永远承担某个 role；
+- 每次都走相同的分工；
+- 每个任务都必须输出同一种 plan；
+- LOW/MEDIUM task 也必须做昂贵 Review。
+
+### 3.2 GitHub：Durable System of Record
+
+GitHub 持久化：
+
+- source code 和 Git history；
+- Issues、Pull Requests、review decisions；
+- Product / Platform Kanban；
+- CI results；
+- Controller configuration；
+- Agent policies、roles、provider profiles、Skills；
+- architecture docs、ADRs、runbooks；
+- task acceptance、human-gate decisions 和最终 outcome。
+
+Orca message、terminal output 或 agent transcript 中出现的长期有效知识，必须晋升为
+Issue comment、commit、doc、ADR、test、eval 或 policy。完整 transcript 默认不作为
+未来 task context。
+
+### 3.3 Orca：Primary ADE and Runtime Plane
+
+Orca 默认负责六类 deterministic runtime capability。
+
+#### ADE 与 workspace
+
+- repo / folder context；
+- worktree 视图和状态；
+- terminal、tab、pane 和 Agent session；
+- 本地开发与验证入口。
+
+#### Git-worktree isolation
+
+- 创建和跟踪 task worktree；
+- 区分 parent/child 与 top-level Orca lineage；
+- 运行 repository setup policy；
+- 为并行可写任务提供独立 checkout。
+
+Orca lineage 与 Git base 是两个决定。`--no-parent` 只表达 Orca 中的 top-level
+关系，不等于“从当前 feature branch 分支”。Root 必须单独选择 base ref。
+
+#### Agent launch / terminal interface
+
+- 在 worktree 第一 terminal 启动已配置 Agent；
+- 创建、读取、等待、发送和关闭 Agent terminal；
+- 通过 runtime handle 路由交互；
+- 保留 Agent session 与 workspace 的对应关系。
+
+普通 Agent worktree 优先 agent-first create。不要用 raw `git worktree` + ad hoc PTY
+重新拼装 Orca 已经提供的生命周期。
+
+#### Collaboration and orchestration
+
+Orca Orchestration 提供：
+
+- Run：coordinator namespace / inbox；
+- Task：可追踪工作项；
+- Dispatch：一次 task attempt 到某个 Agent terminal 的 assignment；
+- structured send / reply / ask；
+- dependency 和 decision gate；
+- `worker_done` / escalation / question；
+- supervised Worker 启动、等待、重用、retain 和 release；
+- completion tracking。
+
+当 Root 需要等待、整合和解决 Reviewer/Worker 结果时，使用 supervised
+Orchestration。真正的 full handoff 表示 ownership 已转移，原 Root 不再监控，不应伪装
+成 tracked dispatch。
+
+#### Local and SSH / connected-environment execution
+
+Orca 是默认本地与远端执行层。远端 Worker 通过保存的 environment / connected
+Orca server 运行，Run 和 Task 仍由 coordinator runtime 管理，后续通信按 Dispatch ID
+路由。
+
+Controller 可以决定“哪个 node 符合 policy”，但由 Orca 执行 worktree、terminal、
+agent launch 和 dispatch lifecycle。
+
+#### Operational contract
+
+Orca CLI grammar 会随版本演进。Agent 在运行 Orca command 前必须：
+
+1. 按 installed `orca-cli` skill 选择本 session 唯一 executable；
+2. 读取 `ORCA skills get orca-cli`；
+3. 需要 structured coordination 时读取 `ORCA skills get orchestration`；
+4. 运行 `ORCA status --json`；
+5. 优先使用 `--json`；
+6. 不根据旧文档猜测 subcommand 或 flag。
+
+在 Orca-managed terminal 中通常使用 `orca`。Linux 普通 shell 通常使用
+`orca-ide`，避免误启动 GNOME Orca screen reader。最终选择以安装 skill 为准。
+
+### 3.4 Orca 不承担的职责
+
+Orca 不替代：
+
+- GitHub durable task state；
+- repository knowledge；
+- risk classification policy；
+- provider budget policy；
+- human authorization；
+- correctness / architecture judgment；
+- tests / evals；
+- backup-retention policy；
+- production deployment gate。
+
+Orca 记录“发生了什么 runtime effect”；Root、Reviewer、tests 和 policy 决定“结果
+是否正确并可接受”。
+
+### 3.5 Thin Python Controller
+
+Controller 不是另一个 AI Agent，也不是第二个 Orca。
+
+Controller 负责：
+
+1. GitHub READY task polling、claim 和状态同步；
+2. risk、budget、retry、provider fallback policy；
+3. node capability / capacity / concurrency scheduling；
+4. deterministic tests、evals 和 CI coordination；
+5. metrics、audit summary 和异常分类；
+6. protected human gates；
+7. backup、restore、retention 和 recovery policy。
+
+Controller 可以通过薄 adapter 请求 Orca runtime effect，并读取确定性的
+Orchestration settlement；但不复制实现以下能力：
+
+- raw worktree create / remove logic；
+- terminal 或 pane supervisor；
+- Agent launch PTY；
+- Agent-to-Agent message bus；
+- Task / Dispatch 状态机；
+- Worker completion protocol；
+- remote terminal attach protocol。
+
+推荐原则：
+
+> Controller 决定 policy 和外部状态；Orca 执行并证明 runtime lifecycle；Agent
+> 做非确定性判断；GitHub 保存 durable outcome。
+
+### 3.6 Herdr：Optional Persistent-Session Infrastructure
+
+Herdr 不再是默认 execution / communication plane，也不是 Orca 失败时的静默
+fallback。
+
+只有未来 workload 明确需要 detached 或 persistent long-running terminal session，
+并且 Orca 的正常 Agent terminal lifecycle 不适合时，才考虑 Herdr。例如超出 task
+Agent 生命周期的人工值守进程、长期观测 terminal 或特殊实验。
+
+引入前必须另建 ADR，定义：
+
+- 为什么 Orca 不适合该 workload；
+- process、completion 和 cleanup 的唯一 owner；
+- 状态如何晋升到 GitHub；
+- restart / recovery 如何避免与 Orca split brain；
+- secret、budget、node 和 human-gate 边界；
+- 该 workload 是否允许被 Controller 观测或调度。
+
+Herdr 不拥有永久知识、Issue/Kanban truth、review verdict 或质量策略。
 
 ---
 
-## 3.3 Herdr：Execution & Communication Plane
+## 4. Task Lifecycle
 
-Herdr 负责：
-
-- 持久 terminal session；
-- pane/workspace 管理；
-- Agent 识别；
-- Agent 状态；
-- Agent → Agent prompt；
-- read / wait；
-- worktree 工作区；
-- 本机运行；
-- SSH remote attach；
-- 为 Python Controller 提供 CLI/API 自动化接口。
-
-Herdr 不应该承担：
-
-- 项目的永久知识库；
-- Issue/Kanban 的最终事实来源；
-- 复杂业务逻辑；
-- 质量判断；
-- 模型成本策略的唯一来源。
-
----
-
-## 3.4 Python Controller：Deterministic Control Plane
-
-Controller 不是另一个 AI Agent。
-
-它是一个确定性调度程序，类似：
-
-- job scheduler；
-- CI coordinator；
-- workflow engine；
-- process supervisor。
-
-### 第一版职责
-
-1. 从 GitHub Project 找 READY 任务。
-2. Claim task。
-3. 创建 branch/worktree。
-4. 选择执行节点。
-5. 启动 Herdr session / Root Agent。
-6. 传递 Task Packet。
-7. 监控 working / blocked / finished / crashed。
-8. 运行确定性 tests/evals。
-9. 更新 GitHub 状态。
-10. 记录 metrics。
-
-### Controller 不应该做的事情
-
-不要在 Python 中硬编码：
-
-```python
-if task_is_architecturally_complex():
-    ...
-```
-
-复杂性、架构、根因等认知判断由 Root Agent 完成。
-
-Controller 可以硬编码：
-
-```python
-if task.status == "READY":
-    launch_task()
-
-if process.crashed:
-    retry_or_escalate()
-
-if required_tests_failed:
-    mark_verification_failed()
-```
-
-原则：
-
-> 程序负责确定性调度；Agent 负责非确定性判断。
-
----
-
-# 4. Agent 组织模型
-
-## 4.1 一个 Task 对应一个 Root Agent
-
-每个 outcome 有一个 Root Agent 对结果负责。
+默认 task flow：
 
 ```text
-                 Root Agent
-                     │
-              decide dynamically
-                     │
-        ┌────────────┼────────────┐
-        │            │            │
-     self-do      subagent      other CLI
-                     │            │
-                 DeepSeek      Codex/Claude
+GitHub Issue / Ready
+        │
+        ▼
+Controller or human intake
+risk / budget / node / human gates
+        │
+        ▼
+Orca-managed Root worktree + Root terminal
+(default preference: Codex)
+        │
+        ▼
+Root investigates and decides dynamically
+ self-do / DeepSeek Worker / Claude specialist / parallel tasks
+        │
+        ▼
+tests + evals + deterministic checks
+        │
+        ├── HIGH or unresolved risk ──► independent Claude review preferred
+        │
+        ▼
+Root resolves blocking findings
+        │
+        ▼
+meaningful commit + GitHub Issue/Kanban/PR state
 ```
 
-Root Agent 决定：
+步骤：
 
-- 是否需要调查；
-- 是否拆分；
-- 是否并行；
-- 是否让便宜 Agent 实现；
-- 是否需要独立 Review；
-- 失败后是 retry、换模型还是升级。
+1. Issue 提供 goal、acceptance、constraints、risk 和 references。
+2. Controller 或人工验证 task 可开始，应用 policy 并选择 node。
+3. Orca 创建/选择独立 worktree，启动 Root。
+4. Root pull 最小必要 context，决定是否 delegation、parallel 或 escalation。
+5. Root 通过 Orca Orchestration 管理 supervised Worker / Reviewer。
+6. Root 实际执行 required tests / evals。
+7. HIGH task 必须完成独立 Review；其他 task 按风险和不确定性触发。
+8. Root 解决 blocking findings，再次验证。
+9. meaningful changes commit。
+10. GitHub 同步 task state、verification 和 remaining uncertainty。
+
+除非任务明确授权，不自动 push、merge 或部署到 production。
 
 ---
 
-## 4.2 不使用固定组织图
+## 5. Worktree and Git Model
 
-不推荐：
+### 5.1 Isolation rules
 
-```text
-Architect
-   ↓
-Developer
-   ↓
-Reviewer
-   ↓
-Tester
-```
+- 一个 active task 对应一个 branch/worktree；
+- 一个并行可写 agent 对应一个不冲突的 writable worktree；
+- read-only Reviewer 可在包含待审 commit 的独立 worktree/session；
+- 不修改另一个 Agent 的 active worktree；
+- 不在两个 Linux node 共享一个 writable directory；
+- 跨 node 使用 branch、commit、push、fetch、PR 或 explicit artifact；
+- secrets 和大型 market data 不进入 Git。
+
+### 5.2 Orca lineage
+
+使用 child lineage：
+
+- work 依赖当前 task；
+- reviewer 必须看到当前 feature commit；
+- follow-up 是当前 task 的 stacked work。
+
+使用 top-level lineage：
+
+- 独立 repo-wide task；
+- 与当前 feature 无依赖；
+- full ownership handoff 到另一个独立 task。
+
+Lineage 不是 Git base。创建前同时决定：
+
+- Orca parent；
+- Git base ref；
+- 是否需要 current commit；
+- setup policy；
+- node placement。
+
+### 5.3 Reviewer visibility
+
+独立 worktree 无法自动看到另一个 worktree 的 uncommitted edits。第一版流程要求：
+
+1. 实现完成并通过本地检查；
+2. commit first version；
+3. reviewer worktree 以该 commit / feature branch 为 base；
+4. Review packet 同时给出 base-to-head diff command 或 commit；
+5. blocking fix 在 Root worktree 完成并再次 commit；
+6. 必要时启动 follow-up review。
+
+这同时满足 reviewer isolation 和 Git durable context。
+
+---
+
+## 6. Agent Organization
+
+### 6.1 Root
+
+每个 outcome 只有一个 Root。Root：
+
+- 理解 goal、constraints、acceptance、risk；
+- pull repository context；
+- 选择 provider、delegation 和 worktree topology；
+- 通过 Orca 管理 supervised work；
+- 整合结果；
+- 运行 verification；
+- 解决 Review findings；
+- commit meaningful changes；
+- 同步 GitHub durable state；
+- 对最终 outcome 负责。
+
+### 6.2 Worker
+
+Worker 完成明确定义的 scope：
+
+- implementation；
+- search；
+- tests；
+- repetitive execution；
+- bounded diagnosis。
+
+Worker 不擅自扩大 architecture，返回 files、commands、results、failures 和
+uncertainty。Supervised Worker 按 injected lifecycle 发送一次 `worker_done`。
+
+### 6.3 Reviewer
+
+Reviewer 独立对照：
+
+- original goal；
+- acceptance criteria；
+- diff / commit；
+- test evidence；
+- required docs；
+- risk policy。
+
+Reviewer 优先检查 correctness、regression、edge case、security、data integrity、
+financial logic、look-ahead risk 和 missing verification，并区分 blocking /
+non-blocking。
+
+### 6.4 Platform Steward
+
+Platform Steward 管系统改进而不是单个 product outcome：
+
+- workflow metrics；
+- retry / failure classes；
+- review yield；
+- cost pressure；
+- node utilization；
+- routing / skill / test / Controller improvements；
+- Platform Kanban。
+
+Platform Steward 不成为每个 Root 的审批层，也不能自行放宽 human gates。
+
+### 6.5 不使用固定组织图
 
 推荐：
 
 ```text
-                    Root
-                     │
-      ┌──────────────┼──────────────┐
-      │              │              │
- straightforward   parallel       high risk
-      │              │              │
-   self-do       workers      independent review
+                       Root
+                         │
+             evidence-based decision
+          ┌──────────────┼──────────────┐
+          │              │              │
+       self-do       low-cost work   premium specialist
+                         │              │
+                     DeepSeek         Claude
+          │              │              │
+          └──────── tests/evals ────────┘
+                         │
+                risk-based independent review
 ```
+
+Provider preference 可以被 availability、capability、budget、independence 或 task
+evidence 覆盖。
 
 ---
 
-# 5. 模型经济体系
+## 7. Provider and Cost Policy
 
-## 5.1 基本原则
+基本原则：
 
-> 使用“能够可靠完成当前工作”的最低成本资源。
+> 使用能够可靠完成当前工作、满足 independence 和 risk 要求的最低成本资源。
 
-成本层级：
+默认偏好：
 
-```text
-LEVEL 0
-Deterministic tools / scripts / tests
-成本最低，优先使用
+| Work | Preferred provider | Notes |
+|---|---|---|
+| Root ownership | Codex | 默认 Root；不是永久绑定 |
+| Well-scoped implementation/search/testing | DeepSeek | preferred low-cost Worker |
+| Architecture consultation | Claude | premium specialist |
+| Difficult diagnosis | Claude | premium specialist |
+| Ambiguity/conflict resolution | Claude | premium specialist |
+| Independent HIGH-risk review | Claude | 与 implementer 保持独立 |
+| Fallback | any capable provider | 由 capability/availability/budget/evidence 决定 |
 
-LEVEL 1
-DeepSeek Flash / 低成本 Worker
-代码搜索、实现、测试、格式修改、重复执行
+路由顺序写入 `.agent/policies/routing.yaml`，风险触发写入
+`.agent/policies/risk.yaml`。Controller 记录近似 provider pressure，不依赖不稳定的
+精确额度 API。
 
-LEVEL 2
-DeepSeek Pro / 中成本 Worker
-复杂实现、debug、大范围重构
+至少记录：
 
-LEVEL 3
-Claude Code / Premium Root
-需求理解、架构、拆分、根因分析、冲突解决
-
-LEVEL 4
-Codex / Premium Independent Opinion
-高风险独立验证、第二意见、复杂 Review
-```
-
-这里的 LEVEL 3/4 是角色示例，不是永久绑定。
-
----
-
-## 5.2 推荐的默认路由
-
-### LOW
-
-```text
-DeepSeek
-   ↓
-tests
-   ↓
-Done
-```
-
-适用：
-
-- 文档；
-- typo；
-- 简单日志；
-- 明确的小修复；
-- 简单测试。
-
-### MEDIUM
-
-```text
-Claude Root
-   ↓
-DeepSeek Worker
-   ↓
-Tests
-   ↓
-Root check
-   ↓
-Done
-```
-
-适用：
-
-- 普通新功能；
-- 跨模块 bug；
-- 中等重构；
-- API integration。
-
-### HIGH
-
-```text
-Claude Root
-   ↓
-DeepSeek Worker(s)
-   ↓
-Tests/Evals
-   ↓
-Codex independent review
-   ↓
-Root resolves disagreement
-   ↓
-Done
-```
-
-HIGH 包括：
-
-- 行情清洗/复权；
-- 回测逻辑；
-- look-ahead-sensitive 代码；
-- 交易信号；
-- PnL；
-- 仓位/风险；
-- 订单执行；
-- 认证/权限；
-- destructive migration；
-- Controller 核心安全策略。
-
----
-
-# 6. Claude / Codex 订阅额度平衡
-
-不要永久绑定：
-
-```text
-Claude = Root
-Codex = Reviewer
-```
-
-应视为 Premium Pool：
-
-```text
-               Premium Pool
-           ┌────────┴────────┐
-        Claude             Codex
-           │                 │
-       pressure/role/availability
-           └────────┬────────┘
-                    ▼
-                 Router
-```
-
-第一版可使用软预算：
-
-```yaml
-premium_resources:
-  claude:
-    preferred_roles:
-      - root
-      - architecture
-      - diagnosis
-    reserve_ratio: 0.30
-
-  codex:
-    preferred_roles:
-      - independent_review
-      - root_fallback
-    reserve_ratio: 0.30
-
-  deepseek:
-    preferred_roles:
-      - implementation
-      - test
-      - search
-```
-
-Controller 自己记录近似压力，而不是依赖不存在或不稳定的“精确剩余额度 API”。
-
-记录：
-
-- task；
-- provider；
-- role；
+- task / role / provider；
 - duration；
 - retries；
-- approximate context size；
-- complexity weight；
-- rate-limit / quota failure。
-
-当 Claude 压力高时：
-
-```text
-Codex Root
-→ DeepSeek implementation
-→ Claude optional review
-```
-
-当 Codex 压力高时：
-
-```text
-Claude Root
-→ DeepSeek implementation
-→ Codex only for HIGH risk
-```
+- approximate context / complexity；
+- quota / rate-limit failure；
+- review yield；
+- verification outcome。
 
 ---
 
-# 7. Context 与 Memory 架构
+## 8. Risk and Verification
 
-## 7.1 核心原则
+### 8.1 LOW
 
-> 项目记忆属于 repository，而不是聊天 session。
+清晰、局部、后果低且验证直接。默认不要求独立 Review，但必须运行适用 tests。
 
-上下文分为五层。
+### 8.2 MEDIUM
 
----
+普通 feature、跨模块 bug、中等 refactor、API integration。独立 Review 按
+uncertainty、blast radius 和 test quality 触发。
 
-## 7.2 Layer A：永久行为规则
+### 8.3 HIGH
 
-文件：
+包括但不限于：
 
-```text
-AGENTS.md
-```
+- financial calculations；
+- market-data transformations；
+- adjustment-factor logic；
+- backtesting；
+- look-ahead-sensitive logic；
+- trading signals；
+- PnL；
+- position / risk；
+- order execution；
+- authentication / authorization；
+- destructive migrations；
+- Controller security / safety policy。
 
-内容：
+HIGH 必须：
 
-- 项目目标；
-- repository map；
-- canonical commands；
-- source-of-truth；
-- risk levels；
-- Git 规则；
-- definition of done；
-- agent autonomy；
-- delegation 原则；
-- verification 原则；
-- cost policy。
+1. required tests / evals 实际执行；
+2. independent reviewer 与 implementer 保持认知隔离；
+3. blocking findings 解决；
+4. remaining uncertainty 显式报告；
+5. 必要 human gate 保持。
 
-只写长期不变量。
+本任务改变 Controller safety boundary，因此即使主要是 docs/config，也采用独立
+architecture review。
 
----
+### 8.4 Source of truth
 
-## 7.3 Layer B：项目知识
+冲突时优先级：
 
-```text
-docs/
-├── ARCHITECTURE.md
-├── DATA_MODEL.md
-├── BACKTESTING.md
-├── DATA_ADJUSTMENT.md
-├── decisions/
-│   ├── ADR-001-*.md
-│   └── ADR-002-*.md
-└── runbooks/
-```
+1. executable tests / evals；
+2. code / schema / config；
+3. architecture / project docs；
+4. comments / conversation。
 
-Architecture Decision Record（ADR）用于保存：
-
-- 做了什么决策；
-- 为什么；
-- 替代方案；
-- 影响；
-- 如何验证。
+不得削弱 test 只为让结果通过。未实际执行不得声称 passed。
 
 ---
 
-## 7.4 Layer C：Task Memory
+## 9. Context and Memory
 
-使用 GitHub Issue。
+### Layer A：Universal behavior
 
-任务完成后，Issue + branch + commits + PR + tests 应能回答：
+`AGENTS.md` 保存长期不变量：source of truth、risk、Git、delegation、verification、
+cost、human gates、definition of done。
 
-- 当时要解决什么；
-- 有哪些约束；
+### Layer B：Project knowledge
+
+`docs/`、ADRs、runbooks 保存 architecture、domain knowledge、decisions 和 operations。
+
+### Layer C：Task memory
+
+GitHub Issue + branch + commits + PR + tests 应能回答：
+
+- 要解决什么；
+- constraints 是什么；
 - 为什么这样改；
 - 如何验证；
-- 最终结果是什么。
+- 最终 outcome。
 
----
+### Layer D：Runtime telemetry
 
-## 7.5 Layer D：Runtime Memory / Telemetry
+`.agent/runs/<task>/` 可保存 manifest、summary、tests、agents、metrics。它用于
+debug、audit 和 harness improvement，不替代 GitHub。
 
-例如：
-
-```text
-.agent/
-└── runs/
-    └── task-142/
-        ├── manifest.json
-        ├── summary.md
-        ├── tests.json
-        ├── agents.json
-        └── metrics.json
-```
-
-用于：
-
-- debug；
-- audit；
-- 统计；
-- harness 优化。
-
-完整 transcript 不应该默认成为下一次任务的上下文。
-
----
-
-## 7.6 Layer E：经验晋升
-
-反复出现的问题逐步晋升：
+### Layer E：Experience promotion
 
 ```text
 Conversation
     ↓
 Observation
     ↓
-Knowledge
+Issue / metric
     ↓
-Doc / Skill / Test / Tool
+Doc / Skill / Test / Eval / Controller policy
 ```
 
-判断规则：
-
-| 发现 | 去哪里 |
-|---|---|
-| 一次性上下文 | Issue |
-| 长期知识 | docs/ |
-| 反复工作方法 | Skill |
-| 必须遵守的行为原则 | AGENTS.md |
-| 可客观验证的正确性 | tests/evals |
-| 可自动执行的动作 | Controller |
+一次性 context 进入 Issue；长期知识进入 docs；重复流程进入 Skill；客观规则进入
+tests/evals；deterministic policy 进入 Controller/config。
 
 ---
 
-# 8. Context Packet
+## 10. Task and Review Packets
 
-不要把整个 repository 和全部历史对话灌给 Root。
-
-Controller 提供最小 Task Packet：
+Root task packet 至少包含：
 
 ```text
-TASK
-Issue #142
-
+TASK / ISSUE
 ROLE
-Root
-
 RISK
-HIGH
-
-WORKTREE
-/path/to/worktrees/task-142
-
-BASE
-main@<commit>
-
-RELEVANT DOCS
-docs/DATA_ADJUSTMENT.md
-docs/decisions/ADR-002.md
-
+GOAL
 ACCEPTANCE
-...
-
+CONSTRAINTS / NON-GOALS
+WORKTREE
+BASE COMMIT
+RELEVANT DOCS
+REQUIRED TESTS / EVALS
 CURRENT CI
-PASS
-
 PREVIOUS ATTEMPTS
-none
+BUDGET / HUMAN GATES
 ```
 
-原则：
-
-> Context should be pulled when needed, not pushed in full by default.
-
----
-
-# 9. Agent-to-Agent Handoff 标准
-
-Herdr 直接通信效率高，但 handoff 必须结构化。
-
-最低格式：
+Agent-to-Agent assignment 至少包含：
 
 ```text
 GOAL
@@ -623,658 +601,95 @@ CONTEXT
 SCOPE
 CONSTRAINTS
 EXPECTED OUTPUT
-```
-
-示例：
-
-```text
-GOAL:
-Review the adjustment-factor implementation.
-
-CONTEXT:
-Task #142 fixes a discontinuity around ex-dividend dates.
-
-SCOPE:
-src/data/adjustment/*
-tests/data/*
-
-CONSTRAINTS:
-Do not modify code.
-
-EXPECTED OUTPUT:
-1. correctness issues
-2. look-ahead risks
-3. missing edge cases
-4. blocking/non-blocking classification
-```
-
-避免：
-
-```text
-“看看刚才那个。”
-```
-
----
-
-# 10. Independent Review 原则
-
-高风险 Review Agent 应获得：
-
-- 原始任务；
-- Acceptance Criteria；
-- diff/commit；
-- tests；
-- 必要文档。
-
-不必默认获得：
-
-- Implementer 的全部 reasoning；
-- Root 对实现的长篇辩护。
-
-目的：
-
-> 保持一定认知独立性，减少 Reviewer 被 Implementer 的推理路径锚定。
-
----
-
-# 11. AGENTS.md / Provider / Role 分层
-
-推荐目录：
-
-```text
-repo/
-├── AGENTS.md
-├── CLAUDE.md
-│
-├── .agent/
-│   ├── providers/
-│   │   ├── claude.md
-│   │   ├── codex.md
-│   │   └── deepseek.md
-│   │
-│   ├── roles/
-│   │   ├── root.md
-│   │   ├── worker.md
-│   │   ├── reviewer.md
-│   │   └── platform-steward.md
-│   │
-│   ├── policies/
-│   │   ├── routing.yaml
-│   │   ├── risk.yaml
-│   │   └── retry.yaml
-│   │
-│   └── runs/
-│
-└── docs/
-```
-
-行为由四部分组合：
-
-```text
-Universal Rules
-      +
-Provider Profile
-      +
-Role Profile
-      +
-Task Packet
-```
-
-而不是：
-
-```text
-Claude永远Root
-DeepSeek永远Worker
-Codex永远Reviewer
-```
-
----
-
-# 12. AGENTS.md 推荐内容
-
-```markdown
-# AGENTS.md
-
-## Project Purpose
-长期项目目标。
-
-## Repository Map
-核心目录说明。
-
-## Canonical Commands
-install / test / lint / typecheck / integration / backtest。
-
-## Source of Truth
-tests > code/schema > docs > comments。
-
-## Working Principles
-理解已有行为后再修改。
-最小化无关修改。
-不能隐藏 failing tests。
-不能通过削弱测试来“修复”测试。
-
-## Agent Autonomy
-允许自行规划、delegation、parallelization、review。
-不为满足固定流程而创建 Agent。
-
-## Delegation
-优先委派：
-- 可独立定义；
-- 可并行；
-- 输出量大；
-- 会污染 Root context；
-- 需要独立第二意见。
-
-## Risk
-LOW / MEDIUM / HIGH。
-
-## Verification
-未实际执行测试，不得声称测试通过。
-
-## Git Rules
-一个任务一个 branch/worktree。
-不得修改其他 Agent 的 active worktree。
-
-## Cost Policy
-Use the cheapest capable resource.
-Reserve premium agents for high-value decisions.
-
-## Definition of Done
-Acceptance 满足；
-测试通过；
-required independent verification 完成；
-无已知 blocking regression；
-不确定性明确报告。
-```
-
----
-
-# 13. CLAUDE.md
-
-Claude Code 使用自身项目指令机制，因此可用一个薄适配层引用公共规则。
-
-示意：
-
-```markdown
-# CLAUDE.md
-
-@AGENTS.md
-
-## Claude-specific guidance
-
-See .agent/providers/claude.md.
-```
-
-Provider 文件只写 Harness/模型特有的执行建议，不复制通用项目规则。
-
----
-
-# 14. Role Profiles
-
-## root.md
-
-Root 负责：
-
-- 理解任务；
-- 定位不确定性；
-- 选择调查策略；
-- 判断是否 delegation；
-- 选择 worker；
-- 整合结果；
-- 判断是否升级 review；
-- 对最终结果负责。
-
-## worker.md
-
-Worker 负责：
-
-- 在给定 scope 内执行；
-- 修改代码；
-- 写测试；
-- 运行验证；
-- 返回 changed files/tests/remaining uncertainty；
-- 不擅自扩大架构范围。
-
-## reviewer.md
-
-Reviewer：
-
-- 独立判断；
-- 关注 correctness/regression/edge case/security/data integrity；
-- 区分 blocking/non-blocking；
-- 不因 Implementer 的解释而默认接受实现。
-
-## platform-steward.md
-
-Platform Steward：
-
-- 观察整体工作流；
-- 维护 Platform Kanban；
-- 分析 retry/失败/成本；
-- 提出 Controller 改进；
-- 提出 AGENTS/Skill/Test/Eval 改进；
-- 不成为每个 Task 的中央审批节点。
-
----
-
-# 15. Platform Steward 架构
-
-```text
-                 Platform Steward
-                 ↑              │
-              metrics           │ proposals
-                 │              ▼
-             Control Plane
-                 │
- ┌───────────────┼────────────────┐
- ▼               ▼                ▼
-Task A          Task B            Task C
-Root            Root              Root
-```
-
-原则：
-
-> Platform Steward 管“系统”；Root Agent 管“任务”。
-
-不要：
-
-```text
-Platform Steward
-      ↓
-所有 Task
-      ↓
-所有 Root
-```
-
-否则它会成为新的中央瓶颈。
-
----
-
-# 16. Platform Steward 应分析的指标
-
-至少记录：
-
-- throughput；
-- first-pass success rate；
-- retry rate；
-- escalation rate；
-- review yield；
-- mean task latency；
-- approximate premium-agent pressure；
-- CI failure rate；
-- common failure classes；
-- blocked task age；
-- node utilization。
-
-Review Yield 示例：
-
-```text
-过去 100 个 MEDIUM task
-Codex review 40 次
-真正找到 blocking bug 2 次
-→ review threshold 可能过低
-```
-
----
-
-# 17. Kanban 设计
-
-## Product Kanban
-
-```text
-Backlog
-  ↓
-Ready
-  ↓
-Running
-  ↓
-Verify
-  ↓
-Review
-  ↓
-Done
-
-side states:
-Blocked
-Failed
-Needs Human
-```
-
-## Platform Kanban
-
-```text
-Observation
-   ↓
-Hypothesis
-   ↓
-Experiment
-   ↓
-Validated
-   ↓
-Deploy
-   ↓
-Monitor
-```
-
-例如：
-
-```text
-Observation:
-DeepSeek 大型 repo 搜索消耗过高
-
-Hypothesis:
-Worker scope 太宽
-
-Experiment:
-task packet 加 allowed_paths
-
-Metric:
-token / latency / success rate
-
-Deploy:
-更新 delegation policy
-```
-
----
-
-# 18. Task Specification 标准
-
-每个 Issue 建议统一结构：
-
-```text
-TITLE
-GOAL
-CONTEXT
-ACCEPTANCE CRITERIA
-CONSTRAINTS
-NON-GOALS
+ACCEPTANCE
 VERIFICATION
-RISK
-REFERENCES
 ```
 
-例：
+Independent Reviewer 额外获得：
 
-```yaml
-title: Fix QFQ discontinuity across ex-dividend dates
+- original user goal；
+- acceptance criteria；
+- changed diff / commit；
+- tests/checks 和结果；
+- risk level；
+- relevant architecture / policy docs。
 
-goal:
-  分钟前复权跨除权日保持连续。
-
-context:
-  部分除权日第一根分钟K出现异常跳变。
-
-acceptance:
-  - 已知异常样例修复
-  - regression test
-  - 日线/分钟逻辑一致
-  - 不产生未来信息
-
-constraints:
-  - 不修改 raw data
-  - 不改变 DB schema
-  - 不硬编码证券/日期
-
-non_goals:
-  - 不重写整个数据 pipeline
-
-verification:
-  - unit
-  - regression fixture
-  - look-ahead eval
-
-risk:
-  HIGH
-```
+默认不提供 implementer 私有 reasoning 或长篇辩护，减少 anchoring。
 
 ---
 
-# 19. Definition of Done
+## 11. Orca Orchestration Contract
 
-任务只有在以下条件满足时才是 Done：
+### 11.1 Supervised flow
 
-1. Acceptance Criteria 满足。
-2. required tests/evals 实际执行并通过。
-3. 必要文档更新。
-4. 没有已知 blocking regression。
-5. HIGH risk required independent review 已完成。
-6. 未解决不确定性被显式报告。
-7. 有意义的修改已经 commit。
-8. GitHub task 状态同步。
+常见 coordinator lifecycle：
+
+```text
+Run
+ └── Task
+      └── Dispatch
+           └── Worker terminal
+                ├── question / escalation
+                └── worker_done
+```
+
+Root 先 create/bind Run，再 create Task，之后使用 version-matched
+`worker-start` 或低层 dispatch。等待期间使用 structured `check --wait`，不是固定
+sleep/poll loop。
+
+有效 `worker_done` 自动 settlement。Root 接受后必须：
+
+- 立即把同一个 agent terminal 转移到 follow-up Dispatch；或
+- `worker-release`；或
+- 用户明确要求时 `worker-retain`。
+
+不能因为 timeout、TUI idle 或 heartbeat 就关闭 active Worker。
+
+### 11.2 Full handoff
+
+Full handoff 是 ownership transfer：
+
+- 原 owner 停止监控；
+- 不创建 coordinator-owned task/dispatch；
+- prompt 通过 Orca worktree/terminal 交付；
+- 新 Agent 自己对 outcome 负责。
+
+“handoff”不能与 supervised completion tracking 混用。
+
+### 11.3 Remote Dispatch
+
+跨 node dispatch 使用 current guide 的 connected environment interface。Node
+选择与 placement 是 policy；terminal/agent/dispatch effect 是 Orca responsibility。
+
+Remote task 必须有：
+
+- exact saved environment；
+- exact remote repo selector；
+- compatible branch/commit availability；
+- node capability；
+- secret/data access policy；
+- test location；
+- recovery owner。
 
 ---
 
-# 20. 两台 Linux 机器：Compute Plane
+## 12. Thin Controller Design
 
-两台电脑不能把 RAM 简单合并成单机共享内存池。
-
-正确目标是：
-
-> 合并并发 workload 能力，而不是合并物理 RAM。
-
-推荐：
-
-```text
-GitHub
-   │
-   ├──────────────┐
-   │              │
-Desktop        Laptop
-Control Node   Worker Node
-   │              │
-Herdr          Herdr
-Controller     Worker runtime
-Data/DB        Review/Research
-Heavy tests    Parallel tasks
-Backtests      Light tests
-```
-
----
-
-# 21. Node 调度原则
-
-第一阶段：
-
-> 一个 Task Team 尽量在同一个 Node 内运行。
-
-例如：
-
-```text
-Task #142 — Desktop
-├── Claude Root
-├── DeepSeek Worker
-└── Codex Reviewer
-```
-
-另一任务：
-
-```text
-Task #143 — Laptop
-├── Claude Root
-└── DeepSeek Worker
-```
-
-先实现 task-level parallelism。
-
-第二阶段再实现跨节点 Agent delegation。
-
----
-
-# 22. Node 配置示例
-
-```yaml
-nodes:
-  desktop:
-    host: localhost
-    capabilities:
-      - control
-      - heavy_cpu
-      - gpu
-      - market_data
-      - docker
-      - backtest
-
-  laptop:
-    host: laptop
-    capabilities:
-      - worker
-      - review
-      - research
-      - light_test
-```
-
-以后可以动态读取：
-
-- available RAM；
-- CPU load；
-- disk；
-- temperature；
-- battery；
-- active agents。
-
----
-
-# 23. 跨机器同步原则
-
-不要：
-
-```text
-NFS/shared-folder
-+
-两台机器同时修改同一 working directory
-```
-
-推荐：
-
-```text
-Desktop local clone
-        │
-        ▼
-      GitHub
-        ▲
-        │
-Laptop local clone
-```
-
-跨机器同步通过：
-
-- git push；
-- git fetch；
-- branch；
-- PR；
-- artifact/object storage。
-
----
-
-# 24. Backup / Disaster Recovery
-
-## 24.1 Git 中保存
-
-必须进入 Git：
-
-- code；
-- docs；
-- tests；
-- AGENTS；
-- controller；
-- issue templates；
-- GitHub workflow；
-- policy config；
-- bootstrap scripts。
-
-## 24.2 Git 外保存
-
-不要直接 Git 大型行情数据。
-
-使用：
-
-```text
-data/
-datasets/
-cache/
-```
-
-并配合 manifest：
-
-```yaml
-dataset: market-minute
-version: 2026-08-17
-schema_version: 4
-checksum: ...
-location: ...
-```
-
-大型数据未来可放：
-
-- NAS；
-- S3-compatible object storage；
-- 独立数据盘；
-- DVC/object manifest。
-
-## 24.3 本机未 commit 工作
-
-Git 无法保护未 commit 修改，因此需要 restic 等增量快照工具。
-
-目标：
-
-```text
-Git commit
-    +
-periodic restic snapshot
-    +
-remote GitHub
-    +
-optional second backup
-```
-
-新机器应能够通过：
-
-```text
-git clone
-bootstrap
-restore data/secrets
-```
-
-恢复工作环境。
-
----
-
-# 25. Secret Management
-
-绝不进入 Git：
-
-- API keys；
-- Claude/Codex 登录 token；
-- DeepSeek API key；
-- SSH private key；
-- database password；
-- production credentials。
-
-本地使用：
-
-- environment variables；
-- `.env`（加入 `.gitignore`）；
-- secret manager；
-- OS keyring。
-
----
-
-# 26. Controller 推荐目录
+推荐 future layout：
 
 ```text
 controller/
 ├── pyproject.toml
-├── src/
-│   └── agent_controller/
-│       ├── scheduler.py
-│       ├── state.py
-│       ├── github.py
-│       ├── herdr.py
-│       ├── nodes.py
-│       ├── verifier.py
-│       ├── metrics.py
-│       └── policy.py
-│
+├── src/agent_controller/
+│   ├── github.py
+│   ├── policy.py
+│   ├── nodes.py
+│   ├── verifier.py
+│   ├── metrics.py
+│   ├── gates.py
+│   ├── backup.py
+│   ├── state.py
+│   └── orca_adapter.py
 ├── tests/
 └── config/
     ├── nodes.yaml
@@ -1283,177 +698,293 @@ controller/
     └── retry.yaml
 ```
 
-建议尽量把 policy 配置化，不硬编码。
+`orca_adapter.py` 是薄 integration boundary，不是重新实现 Orca。它应：
+
+- 调用当前 Orca CLI/API contract；
+- 使用 structured JSON；
+- 保存 request id / Run / Task / Dispatch references；
+- 将确定性 settlement 映射到 Controller state；
+- 报告 exact runtime error；
+- 不在失败时静默切换另一套 terminal/worktree system。
+
+Controller state machine 只覆盖 durable/policy 状态，例如：
+
+```text
+READY
+  → CLAIMED
+  → POLICY_CHECKED
+  → RUNTIME_REQUESTED
+  → VERIFY
+  → REVIEW_REQUIRED / NEEDS_HUMAN
+  → DONE / FAILED / BLOCKED
+```
+
+Orca 内部继续拥有 worktree、terminal、Dispatch 和 Worker cleanup 状态。
 
 ---
 
-# 27. Controller 演进路线
+## 13. Multiple Linux Nodes
 
-## V0 — 人工
+目标是合并并发 workload capacity，而不是共享 RAM 或 writable filesystem。
 
-人工：
+```text
+                     GitHub
+                 durable sync point
+                  /             \
+          Desktop Node        Laptop Node
+          Orca runtime        Orca runtime
+          heavy tests         review/search
+          local data          light tests
+```
+
+第一阶段：
+
+- 一个 Task Team 尽量在一个 node；
+- Controller 按 capability/capacity 选 node；
+- Orca 在该 node 创建 worktree 和 Agent；
+- node 之间通过 Git 同步。
+
+第二阶段：
+
+- coordinator Run 可 dispatch 到 connected remote environment；
+- exact remote repository selector；
+- Task/Dispatch completion 仍由 Orca Orchestration 跟踪；
+- Controller 只记录 placement policy 和结果。
+
+禁止：
+
+- NFS/shared folder 上多 node 同时写；
+- 在另一 node 直接修改当前 Agent worktree；
+- 用 terminal transcript 代替 commit；
+- 让 remote node 绕过 human gate 或 secret policy。
+
+---
+
+## 14. Kanban and Durable Task State
+
+Product Kanban：
+
+```text
+Backlog → Ready → Running → Verify → Review → Done
+                   │          │
+                 Blocked   Needs Human / Failed
+```
+
+Platform Kanban：
+
+```text
+Observation → Hypothesis → Experiment → Validated → Deploy → Monitor
+```
+
+Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth。Controller
+或 Root 在 durable transition 时同步 GitHub。
+
+---
+
+## 15. Metrics and Harness Improvement
+
+至少记录：
+
+- throughput；
+- first-pass success；
+- retry / escalation；
+- review yield；
+- mean task latency；
+- provider pressure；
+- CI / eval failure；
+- blocked age；
+- node utilization；
+- Orca worktree/launch/dispatch failure classes；
+- human-gate wait；
+- backup/recovery checks。
+
+反复 failure 应优先晋升为：
+
+- test / eval；
+- Skill；
+- runbook；
+- provider/role policy；
+- Controller deterministic rule；
+- node setup fix。
+
+不要用越来越长的 prompt 替代 harness improvement。
+
+---
+
+## 16. Backup, Recovery and Secrets
+
+Git 中保存：
+
+- code；
+- docs / ADR / runbook；
+- tests / evals；
+- AGENTS / provider / role / policy；
+- Controller；
+- issue/workflow templates；
+- bootstrap scripts。
+
+Git 外保存：
+
+- secrets；
+- provider login tokens；
+- SSH private keys；
+- production credentials；
+- large market data；
+- cache；
+- local runtime database；
+- uncommitted worktree snapshots。
+
+恢复目标：
+
+```text
+git clone
+  + bootstrap
+  + restore secrets/data
+  + Orca repo/environment registration
+  + restore allowed uncommitted snapshot
+```
+
+未 commit work 需要 restic 或等价 snapshot。Orca runtime metadata 重要但不替代 Git
+与 backup。
+
+---
+
+## 17. Evolution Roadmap
+
+### V0 — Manual Orca-First Validation
+
+人工完成：
 
 ```text
 Issue
-→ Herdr
-→ Claude
-→ DeepSeek
-→ Tests
-→ optional Codex
+→ Orca worktree
+→ Codex Root
+→ optional DeepSeek Worker / Claude specialist
+→ tests/evals
+→ required Claude independent review
+→ commit + GitHub state
 ```
 
-目的：验证真实工作方式。
+验证真实的 worktree、setup、Agent launch、Orchestration、review、remote 和 recovery
+行为。
 
-## V1 — Thin Controller
+### V1 — Thin Controller
 
 自动：
 
-- READY task；
-- worktree；
-- launch；
-- status；
-- verify；
-- GitHub state。
+- GitHub polling / claim；
+- risk / budget / gate check；
+- node choice；
+- request Orca Root launch；
+- deterministic verify；
+- GitHub state sync；
+- metrics。
 
-## V2 — Node Scheduler
+不实现 worktree/terminal/message/dispatch engine。
 
-增加：
-
-- desktop/laptop 选择；
-- capacity；
-- concurrency。
-
-## V3 — Model Budget Router
+### V2 — Node Scheduler
 
 增加：
 
-- Claude/Codex pressure；
-- provider fallback；
-- DeepSeek worker tiers。
+- live capacity；
+- capabilities；
+- concurrency；
+- battery/temperature/load；
+- data locality；
+- connected environment health。
 
-## V4 — Dynamic Agent Spawn
+### V3 — Budget and Provider Router
 
-Root 可通过 Herdr 创建 Worker / Reviewer。
+增加：
 
-## V5 — Harness Improvement Loop
+- approximate provider pressure；
+- fallback；
+- premium reserve；
+- review yield feedback；
+- capability evidence。
 
-Platform Steward 定期分析失败 trace，提出：
+### V4 — Harness Improvement Loop
 
-- tests；
-- skills；
-- docs；
-- policy；
-- controller 改进。
+Platform Steward 根据 metrics 提出 tests、skills、docs、policy、node 和 Controller
+improvements。
 
----
-
-# 28. 最重要的 Agent 使用原则
-
-1. 给 Agent outcome，不给人工写好的思考过程。
-2. 一个 Root Agent 对一个 outcome 负责。
-3. 是否使用 subagent 默认由 Root 决定。
-4. 可独立、可并行或上下文污染大的工作优先 delegation。
-5. Review 按风险触发，不按固定流程触发。
-6. 优先 tests/evals，而不是“请仔细检查”。
-7. 每个并行修改使用独立 worktree。
-8. handoff 必须结构化。
-9. 长期知识进入 repository。
-10. 一次性任务进入 Issue。
-11. 反复流程进入 Skill。
-12. 可验证规则进入 tests/evals。
-13. 可自动化动作进入 Controller。
-14. 使用满足需求的最低成本模型。
-15. 不因为 Agent 更强就取消高风险 guardrail。
-16. 高风险独立 Review 与 Implementer 保持认知隔离。
-17. Platform Steward 管系统，不管理每个 task 的细节。
-18. 不让聊天历史成为不可替代的项目资产。
-19. 节点可替换；项目不可依赖某一台机器。
-20. 优先改善 harness，而不是无限增加 prompt。
+Herdr integration 不属于默认 roadmap；只有出现明确 persistent-session workload
+才另立 proposal。
 
 ---
 
-# 29. 推荐 Repository Skeleton
+## 18. Architecture Guardrails
+
+Root、Platform Steward、Controller 和 Orca runtime 都不得无授权放宽：
+
+- production trading permissions；
+- destructive data access；
+- secret / credential protections；
+- HIGH-risk independent review；
+- order / capital safety；
+- maximum budget / concurrency；
+- production deploy gate；
+- minimum backup retention。
+
+可以通过 Issue / PR / ADR 提议变更，最终仍需 human gate。
+
+---
+
+## 19. Definition of Done
+
+Task 只有在以下条件满足时才完成：
+
+1. acceptance criteria 满足；
+2. required tests/evals 实际执行并通过；
+3. required docs 更新；
+4. 无已知 blocking regression；
+5. required independent verification 完成；
+6. unresolved uncertainty 显式报告；
+7. meaningful changes 已 commit；
+8. GitHub task state 已同步。
+
+Orca `worker_done` 只表示一个 supervised assignment settlement，不自动等同于整个
+product task Done。最终 outcome 仍由 Root 与 durable gates 决定。
+
+---
+
+## 20. Current State and Remaining Validation
+
+本 architecture version 已定义 Orca-first boundary，但 repository 当前仍是
+manual-workflow skeleton：
+
+- Python Controller 尚未实现；
+- 第二台真实 Linux/SSH node 的 connected environment 尚待 end-to-end 验证；
+- DeepSeek launcher 的具体 Orca agent id / harness integration 必须按安装环境发现，
+  不能从文档猜测；
+- Orca version-specific command 可能更新，必须每次读取 installed skills；
+- 尚无需要 Herdr 的已验证 workload；
+- GitHub Issue/Kanban 自动同步尚待 Controller V1。
+
+这些不是改变 architecture boundary 的理由，而是 V0/V1 的明确 validation backlog。
+
+---
+
+## 21. Operational References
+
+运行时 source of truth：
 
 ```text
-project/
-├── AGENTS.md
-├── CLAUDE.md
-├── README.md
-│
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── DATA_MODEL.md
-│   ├── decisions/
-│   └── runbooks/
-│
-├── .agent/
-│   ├── providers/
-│   ├── roles/
-│   ├── policies/
-│   ├── skills/
-│   └── runs/
-│
-├── controller/
-│
-├── src/
-├── tests/
-├── evals/
-│
-├── infra/
-│   ├── bootstrap.sh
-│   ├── systemd/
-│   └── node.example.yaml
-│
-├── data/
-│   └── .gitignore
-│
-└── .github/
-    ├── ISSUE_TEMPLATE/
-    └── workflows/
+ORCA skills get orca-cli
+ORCA skills get orchestration
+ORCA status --json
 ```
 
----
+Repository references：
 
-# 30. Architecture Guardrails
+- `AGENTS.md`；
+- `.agent/roles/`；
+- `.agent/providers/`；
+- `.agent/policies/routing.yaml`；
+- `.agent/policies/risk.yaml`；
+- `docs/decisions/ADR-001-orca-first-execution-plane.md`；
+- `docs/runbooks/ORCA_WORKFLOW.md`；
+- `tests/test_architecture_policy.py`。
 
-以下修改不应由 Platform Steward 或 Root Agent 无审批地自行放宽：
-
-- 生产交易权限；
-- destructive data access；
-- secret/credential 权限；
-- HIGH-risk review requirement；
-- 资金/订单 guardrail；
-- 最大预算/并发上限；
-- production deploy gate；
-- backup retention 的最低要求。
-
-Agent 可以提出修改建议，但应进入 PR/Needs Human。
-
----
-
-# 31. 当前工具状态注意事项（2026-08-17）
-
-- Herdr Linux 有稳定安装渠道，CLI 与 Socket/API 适合脚本化自动化。
-- Claude Code 支持 Ubuntu/Linux，并提供官方 native installer。
-- Codex CLI 支持 macOS/Linux standalone installer，并可用 `codex exec` 参与自动化。
-- DeepSeek Harness 已由 `deepseek-ai` 官方开源，但当前明确标记为 **developer preview**，可能发生破坏性兼容变化。
-- 因此 DeepSeek Harness 必须通过 provider adapter 隔离，不要把项目状态和核心 Controller 强耦合在其内部接口上。
-
----
-
-# 32. 官方资料
-
-以下链接用于核对安装/接口；工具升级时优先重新检查官方文档。
-
-- Herdr Install: https://herdr.dev/docs/install/
-- Herdr Agent Automation: https://herdr.dev/docs/agent-automation/
-- Herdr Remote/Persistence: https://herdr.dev/docs/persistence-remote/
-- Herdr CLI Reference: https://herdr.dev/docs/cli-reference/
-- Claude Code Setup: https://code.claude.com/docs/en/setup
-- Codex CLI: https://learn.chatgpt.com/docs/codex/cli
-- DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness
-- DeepSeek Harness Python SDK: https://github.com/deepseek-ai/deepseek-harness/tree/master/python/sdk
-- Git Worktree: https://git-scm.com/docs/git-worktree
-- GitHub SSH: https://docs.github.com/en/authentication/connecting-to-github-with-ssh
-- uv: https://docs.astral.sh/uv/
-- restic: https://restic.readthedocs.io/
+外部 durable mechanisms 继续使用 Git、GitHub Issues/Projects/PR/CI、节点 backup
+和受控 secret management。
