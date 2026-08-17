@@ -1,0 +1,20 @@
+# Retry policy intentionally kept minimal during manual workflow phase.
+#
+# Do not define complex retry counts or backoff rules before collecting
+# evidence from real multi-agent tasks.
+#
+# Future Controller policy should distinguish at least:
+#
+# - process crash
+# - transient provider failure
+# - rate limit / quota constraint
+# - verification failure
+# - repeated implementation failure
+#
+# Provider constraints should allow routing to a fallback provider.
+#
+# Repeated or non-transient failures should be escalated rather than
+# blindly retried.
+#
+# Quantitative retry limits will be defined after manual workflow data
+# has been collected.

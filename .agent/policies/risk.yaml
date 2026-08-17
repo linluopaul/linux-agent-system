@@ -1,0 +1,43 @@
+levels:
+  low:
+    description: >
+      Clear, localized work with low consequence and straightforward
+      verification.
+    examples:
+      - documentation
+      - typo fixes
+      - simple logging changes
+      - clearly scoped small fixes
+      - simple tests
+    independent_review: false
+
+  medium:
+    description: >
+      Normal engineering work with moderate scope, ambiguity, or
+      regression potential.
+    examples:
+      - ordinary new features
+      - cross-module bugs
+      - moderate refactors
+      - API integrations
+    independent_review: conditional
+
+  high:
+    description: >
+      Work where correctness, data integrity, security, financial
+      behavior, or irreversible effects require stronger verification.
+    examples:
+      - financial calculations
+      - market_data_transformations
+      - adjustment_factor_logic
+      - backtesting
+      - look_ahead_sensitive_logic
+      - trading_signals
+      - pnl_calculation
+      - position_and_risk_calculation
+      - order_execution
+      - authentication_and_authorization
+      - destructive_migrations
+      - controller_security_and_safety_policy
+    independent_review: required
+    human_gate_may_be_required: true
