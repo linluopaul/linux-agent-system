@@ -114,8 +114,10 @@ Use Orca as the default interface for:
 - worktree and terminal status
 
 Use the version-matched Orca guides exposed by the installed CLI before automating Orca
-commands. In an Orca-managed terminal use `orca`; on Linux outside Orca use the executable
-selected by the installed `orca-cli` skill (normally `orca-ide`).
+commands. Select one executable for the session in this order: `ORCA_CLI_COMMAND` when
+exported; `orca-dev` in a development checkout exposing `ORCA_DEV_REPO_ROOT`; `orca-ide`
+on Linux outside an Orca-managed terminal; otherwise `orca` inside an Orca-managed
+terminal. Reuse that executable for every later Orca command.
 
 Do not duplicate Orca's deterministic worktree, terminal, messaging or dispatch lifecycle
 inside the Python Controller. The Controller should focus on GitHub task polling and state

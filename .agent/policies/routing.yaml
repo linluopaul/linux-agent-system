@@ -1,6 +1,10 @@
 # Model routing preferences.
 # These are preferences, not permanent provider-role bindings.
 # Capability, availability, risk evidence and budget may justify fallback.
+#
+# risk.yaml is authoritative for whether independent review or a human gate is required.
+# This file chooses providers after those requirements are known. A risk-level preference
+# overrides the same default role key; omitted keys inherit from defaults.
 
 defaults:
   preferred_root:
@@ -11,16 +15,24 @@ defaults:
     - deepseek
     - codex
     - claude
-  preferred_architecture_consultant:
+  preferred_specialist:
     - claude
     - codex
-  preferred_difficult_diagnosis:
+  preferred_reviewer:
     - claude
     - codex
-  preferred_ambiguity_resolver:
+
+work_preferences:
+  architecture_consultation:
     - claude
     - codex
-  preferred_high_risk_reviewer:
+  difficult_diagnosis:
+    - claude
+    - codex
+  ambiguity_resolution:
+    - claude
+    - codex
+  independent_high_risk_review:
     - claude
     - codex
 
@@ -69,7 +81,6 @@ risk:
       - claude
       - codex
     independent_review: required
-    reviewer_independence: required
 
 principles:
   - use_cheapest_capable_resource

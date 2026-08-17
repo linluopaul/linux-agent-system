@@ -76,11 +76,23 @@ Benefits:
 Costs and constraints:
 
 - Orca runtime availability is required for the primary interactive workflow
+- structured collaboration requires Orca's Orchestration experimental feature to be
+  enabled on each participating installation
 - exact CLI grammar must be loaded from the installed skills rather than copied from stale
   documentation
 - multi-node/SSH behavior must be validated against real saved environments and repository
   availability
 - Herdr-specific persistent workloads need a future, explicit adapter and decision record
+
+When Orca is unavailable, the safe default is to preserve Git state and pause new
+supervised multi-agent work until the runtime is restored. An explicitly authorized
+emergency manual mode may use one Root in one existing worktree, but it cannot claim Orca
+Dispatch provenance and must promote all durable state to GitHub. Herdr is not an automatic
+fallback.
+
+`.agent/policies/risk.yaml` is authoritative for whether independent review or a human
+gate is required. `.agent/policies/routing.yaml` selects providers after those
+requirements are known.
 
 ## Verification
 

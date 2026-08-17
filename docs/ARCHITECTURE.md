@@ -84,6 +84,10 @@ Orca runtime state is operational state。GitHub 与 repository artifacts 才是
 state。Controller 负责确定性 policy 和外部系统协调，但不创建另一套 worktree、
 terminal、message 或 dispatch lifecycle。
 
+V0 manual workflow 不依赖尚未实现的 Controller：human 可以从 GitHub task packet
+直接进入 Orca。Controller 出现后仍是 policy / external-state path，而不是所有交互
+必须经过的 runtime gateway。
+
 ---
 
 ## 3. 分层职责
@@ -189,8 +193,10 @@ Orca CLI grammar 会随版本演进。Agent 在运行 Orca command 前必须：
 2. 读取 `ORCA skills get orca-cli`；
 3. 需要 structured coordination 时读取 `ORCA skills get orchestration`；
 4. 运行 `ORCA status --json`；
-5. 优先使用 `--json`；
-6. 不根据旧文档猜测 subcommand 或 flag。
+5. 使用 structured coordination 前确认每个参与安装已在 Orca Settings >
+   Experimental 启用 Orchestration；
+6. 优先使用 `--json`；
+7. 不根据旧文档猜测 subcommand 或 flag。
 
 在 Orca-managed terminal 中通常使用 `orca`。Linux 普通 shell 通常使用
 `orca-ide`，避免误启动 GNOME Orca screen reader。最终选择以安装 skill 为准。
@@ -261,6 +267,17 @@ Agent 生命周期的人工值守进程、长期观测 terminal 或特殊实验�
 - 该 workload 是否允许被 Controller 观测或调度。
 
 Herdr 不拥有永久知识、Issue/Kanban truth、review verdict 或质量策略。
+
+### 3.7 Orca unavailable degraded mode
+
+Orca 不可用时，默认动作是保存现有文件和 Git 状态，暂停启动新的 supervised
+multi-agent work，并恢复本 session 选定的 Orca runtime。不得静默切到 Herdr，也
+不得把普通 shell/agent CLI work 描述成 Orca Dispatch。
+
+紧急 manual mode 必须由 human 明确授权，只允许一个 Root 在一个现有 worktree 内
+使用 Git 和 provider CLI，不做 parallel dispatch 或 completion-tracking 声明，并把
+commands、commits、verification 和 remaining uncertainty 全部晋升到 GitHub。到达
+stable commit 后恢复 Orca-first workflow。
 
 ---
 
@@ -463,8 +480,10 @@ evidence 覆盖。
 | Fallback | any capable provider | 由 capability/availability/budget/evidence 决定 |
 
 路由顺序写入 `.agent/policies/routing.yaml`，风险触发写入
-`.agent/policies/risk.yaml`。Controller 记录近似 provider pressure，不依赖不稳定的
-精确额度 API。
+`.agent/policies/risk.yaml`。`risk.yaml` 对 independent review 和 human gate
+是否 required 具有 authority；`routing.yaml` 只在 requirement 已知后选择 provider，
+risk-level role key 覆盖同名 default，缺省时继承 default。Controller 记录近似
+provider pressure，不依赖不稳定的精确额度 API。
 
 至少记录：
 
@@ -637,13 +656,17 @@ Root 先 create/bind Run，再 create Task，之后使用 version-matched
 `worker-start` 或低层 dispatch。等待期间使用 structured `check --wait`，不是固定
 sleep/poll loop。
 
-有效 `worker_done` 自动 settlement。Root 接受后必须：
+`check` 返回 oldest FIFO Delivery，并持续 replay 同一 batch，直到 coordinator 使用
+`check --ack <delivery_id>`。Root 必须先处理 Delivery 内每条 message；对每个有效
+`worker_done`，在 acknowledgment 前选择 terminal 的下一 owner：
 
 - 立即把同一个 agent terminal 转移到 follow-up Dispatch；或
 - `worker-release`；或
 - 用户明确要求时 `worker-retain`。
 
-不能因为 timeout、TUI idle 或 heartbeat 就关闭 active Worker。
+完成整个 batch 后才 ack，再继续 wait。wait timeout 或 `{count:0}` 只是 liveness
+checkpoint，不是 Worker failure。不能因为 timeout、TUI idle、status 或 heartbeat
+就关闭 active Worker。
 
 ### 11.2 Full handoff
 
@@ -660,6 +683,11 @@ Full handoff 是 ownership transfer：
 
 跨 node dispatch 使用 current guide 的 connected environment interface。Node
 选择与 placement 是 policy；terminal/agent/dispatch effect 是 Orca responsibility。
+
+Remote `current` 与 `new-child` 都无效。使用 discovered exact remote worktree
+selector，或 `new-top-level` + explicit remote repo selector。只在 initial
+`worker-start` 使用 `--on <saved-environment>`；follow-up command 不重复 `--on`，
+由 Dispatch ID 路由。
 
 Remote task 必须有：
 
@@ -697,6 +725,31 @@ controller/
     ├── risk.yaml
     └── retry.yaml
 ```
+
+初始 node policy 示例：
+
+```yaml
+nodes:
+  desktop:
+    host: localhost
+    capabilities:
+      - control
+      - heavy_cpu
+      - gpu
+      - market_data
+      - docker
+      - backtest
+  laptop:
+    host: laptop
+    capabilities:
+      - worker
+      - review
+      - research
+      - light_test
+```
+
+实际 scheduler 还应读取 available RAM、CPU load、disk、temperature、battery、
+active Agents 和 connected-environment health。
 
 `orca_adapter.py` 是薄 integration boundary，不是重新实现 Orca。它应：
 
@@ -834,6 +887,10 @@ Git 外保存：
 - local runtime database；
 - uncommitted worktree snapshots。
 
+本机 secret 使用 environment variables、被 `.gitignore` 排除的 `.env`、OS
+keyring 或受控 secret manager。不同 node 只获得 task 所需最小权限；不得通过 Git、
+Orca message、terminal log 或 review artifact 复制 credential。
+
 恢复目标：
 
 ```text
@@ -958,6 +1015,8 @@ manual-workflow skeleton：
 - DeepSeek launcher 的具体 Orca agent id / harness integration 必须按安装环境发现，
   不能从文档猜测；
 - Orca version-specific command 可能更新，必须每次读取 installed skills；
+- Orchestration 当前依赖每个参与安装启用 Settings > Experimental，node bootstrap
+  与 health check 尚未自动验证这一 precondition；
 - 尚无需要 Herdr 的已验证 workload；
 - GitHub Issue/Kanban 自动同步尚待 Controller V1。
 
@@ -988,3 +1047,15 @@ Repository references：
 
 外部 durable mechanisms 继续使用 Git、GitHub Issues/Projects/PR/CI、节点 backup
 和受控 secret management。
+
+External references（升级时重新核对 official docs）：
+
+- Claude Code setup: https://code.claude.com/docs/en/setup
+- Codex CLI: https://learn.chatgpt.com/docs/codex/cli
+- DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness
+- DeepSeek Harness Python SDK:
+  https://github.com/deepseek-ai/deepseek-harness/tree/master/python/sdk
+- Git worktree: https://git-scm.com/docs/git-worktree
+- GitHub SSH: https://docs.github.com/en/authentication/connecting-to-github-with-ssh
+- uv: https://docs.astral.sh/uv/
+- restic: https://restic.readthedocs.io/

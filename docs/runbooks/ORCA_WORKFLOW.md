@@ -23,7 +23,10 @@ ORCA skills get orchestration
 ORCA status --json
 ```
 
-Read both complete guides. Do not guess subcommands or flags from memory.
+Read both complete guides. Do not guess subcommands or flags from memory. Confirm the
+runtime is reachable and, before relying on structured coordination, confirm the
+Orchestration experimental feature is enabled in Orca Settings > Experimental on every
+participating installation.
 
 ## 2. Prepare the Durable Task Packet
 
@@ -64,8 +67,15 @@ run-create
 task-create
 worker-start
 check --wait
-worker-release
+process every message in the Delivery
+worker-release OR worker-start --terminal <handle> for immediate reuse
+check --ack <delivery_id> --wait
 ```
+
+A coordinator `check` replays the same oldest Delivery until its `delivery_id` is
+acknowledged. Process every message and decide each settled terminal's next owner before
+acknowledging. A wait timeout or `{count:0}` is a liveness checkpoint, not a Worker
+failure; keep waiting while the Dispatch is healthy.
 
 Create independent tasks before starting parallel Workers. Prefer DeepSeek for well-scoped
 implementation, search and testing when a configured DeepSeek launcher is available. Agent
@@ -91,15 +101,28 @@ selects an eligible node from policy and capacity; Orca performs the actual work
 terminal and agent lifecycle.
 
 For a remote supervised Worker, use the current guide's `worker-start --on
-<saved-environment>` form with an exact remote repository selector. Remote `current` and
-ambiguous worktree selectors are invalid. The authoritative Run and Task remain on the
-coordinator runtime, and later communication routes by Dispatch ID.
+<saved-environment>` form. Remote `current` and `new-child` are invalid: use an exact
+discovered remote worktree selector, or `new-top-level` with an explicit remote repository
+selector. The authoritative Run and Task remain on the coordinator runtime. Do not repeat
+`--on` on follow-up commands; later communication routes by Dispatch ID.
 
 Each Linux node uses its own clone and writable worktrees. Cross-node synchronization uses
 branches, commits, pushes, fetches, pull requests or explicit artifacts—not NFS or a shared
 writable directory.
 
-## 6. Verify and Complete
+## 6. Runtime-Unavailable Degraded Mode
+
+If Orca is unavailable, do not silently switch the task to Herdr or claim Orca
+Orchestration provenance. Preserve existing files and Git state, stop starting new
+supervised multi-agent work, and restore the selected Orca runtime first.
+
+Emergency manual work requires explicit human authorization. It is limited to one Root in
+one existing worktree with ordinary Git and provider CLI commands, no parallel dispatch or
+completion-tracking claims, and mandatory promotion of commands, commits, verification and
+remaining uncertainty to GitHub. Resume the Orca-first workflow at a stable commit. Herdr
+still requires its own workload decision and is never the automatic fallback.
+
+## 7. Verify and Complete
 
 The Root:
 
@@ -114,7 +137,7 @@ The Root:
 Do not claim a test passed unless it was executed. Do not merge or push unless the task
 explicitly authorizes it.
 
-## 7. Optional Herdr Use
+## 8. Optional Herdr Use
 
 Herdr is not the default ADE, worktree layer, communication plane or orchestrator. Consider
 it only for a future workload with a concrete requirement for detached or persistent

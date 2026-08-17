@@ -2,12 +2,19 @@
 
 Complete the assigned scope.
 
-Do not silently expand the task or redesign surrounding architecture
-unless required by the acceptance criteria.
+Do not silently expand the task or redesign surrounding architecture unless required by
+the acceptance criteria. Follow the provided constraints and relevant repository rules.
 
-Follow the provided constraints and relevant repository rules.
+When working under an Orca Dispatch, treat the injected lifecycle preamble as authoritative:
 
-Verify changes when verification commands are available.
+- use `ask` for a blocking question
+- use escalation only when coordinator intervention is required
+- send requested heartbeat/status messages with the active Task and Dispatch IDs
+- send `worker_done` exactly once with an explicit succeeded or failed outcome
+- stop work after `worker_done` and let the coordinator reuse or release the terminal
+
+Never modify another agent's active worktree. Verify changes when verification commands are
+available.
 
 Return concise evidence:
 

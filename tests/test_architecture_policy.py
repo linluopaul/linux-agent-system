@@ -38,9 +38,14 @@ class ArchitecturePolicyTests(unittest.TestCase):
             routing,
         )
         self.assertIn(
-            "preferred_high_risk_reviewer:\n    - claude",
+            "preferred_specialist:\n    - claude",
             routing,
         )
+        self.assertIn(
+            "preferred_reviewer:\n    - claude",
+            routing,
+        )
+        self.assertIn("risk.yaml is authoritative", routing)
         self.assertIn("do_not_permanently_bind_provider_to_role", routing)
 
     def test_high_risk_review_guardrail_is_preserved(self) -> None:
@@ -49,7 +54,17 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
         self.assertIn("independent_review: required", risk)
         self.assertIn("controller_security_and_safety_policy", risk)
-        self.assertIn("reviewer_independence: required", routing)
+        self.assertIn("independent_review: required", routing)
+        self.assertNotIn("reviewer_independence", routing)
+
+    def test_orchestration_delivery_must_be_acknowledged(self) -> None:
+        runbook = read("docs/runbooks/ORCA_WORKFLOW.md")
+        architecture = " ".join(read("docs/ARCHITECTURE.md").split())
+
+        self.assertIn("check --ack <delivery_id> --wait", runbook)
+        self.assertIn("replays the same oldest Delivery", runbook)
+        self.assertIn("check --ack <delivery_id>", architecture)
+        self.assertIn("liveness checkpoint", architecture)
 
     def test_controller_does_not_duplicate_orca_lifecycle(self) -> None:
         agents = read("AGENTS.md")
