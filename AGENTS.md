@@ -88,6 +88,11 @@ RECONNAISSANCE STRATEGY
 REQUIRED TESTS / EVALS
 VERIFICATION EVIDENCE REQUIRED
 WORKTREE / BASE COMMIT
+LEAD BRANCH
+INTEGRATION_BASE_SHA
+ALLOWED CHANGED PATHS / SCOPE
+VERIFICATION REQUIREMENTS
+RESULT MODE
 BUDGET / HUMAN GATES
 ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
@@ -246,6 +251,31 @@ same-provider correlation risk before completion.
 Use one active task per branch/worktree.
 
 Do not modify another agent's active worktree.
+
+Every writable Execution Lead-to-Worker dispatch must declare an immutable
+`integration_base_sha` equal to the Execution Lead HEAD. Before any tracked-file
+modification, the Worker must verify that its working tree is clean, the base exists
+locally and `git rev-parse HEAD` exactly equals `integration_base_sha`; if the base
+cannot be obtained, stop and escalate instead of using a guessed base. Orca parent/child
+lineage is orchestration provenance, not proof of Git ancestry.
+
+V1 accepts only an immutable ordered Git commit list from a Worker. No uncommitted
+working-tree result is accepted.
+
+The V1 integration operation is `git cherry-pick` of that ordered commit list into the
+Execution Lead branch. Do not merge the Worker branch, reset the Lead branch to Worker
+HEAD, fast-forward the Lead branch, or infer integration from Orca lineage.
+
+The Execution Lead owns integration conflicts. The Worker must never modify the Lead
+worktree; the Lead may resolve a cherry-pick conflict only within the Execution Packet,
+otherwise it must abort the cherry-pick and escalate or redispatch, then rerun required
+verification after any resolution. The Lead serializes parallel Worker integration and
+cherry-picks later results onto the new Lead HEAD.
+
+The Worker worktree/branch must not be deleted until integration succeeds or the Execution
+Lead explicitly rejects the result. Agent/terminal release may follow receipt of the
+immutable commit result, but its Git objects and branch must remain recoverable until
+settlement.
 
 If an Execution Lead fails mid-flight, the Root owns parent-Dispatch lifecycle recovery
 and replacement, but it does not enter the failed Lead's edit/verify loop. Preserve the

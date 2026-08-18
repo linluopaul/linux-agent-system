@@ -46,6 +46,11 @@ RECONNAISSANCE STRATEGY
 REQUIRED TESTS / EVALS
 VERIFICATION EVIDENCE REQUIRED
 WORKTREE / BASE COMMIT
+LEAD BRANCH
+INTEGRATION_BASE_SHA
+ALLOWED CHANGED PATHS / SCOPE
+VERIFICATION REQUIREMENTS
+RESULT MODE
 BUDGET / HUMAN GATES
 ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
@@ -128,6 +133,136 @@ parent Dispatch ID in the objective and final evidence; settle/release every Wor
 parent `worker_done`. Worker questions terminate at the Lead, and the Root receives only
 compressed Worker evidence.
 
+### 4.1 Writable Worker Git Integration Contract v1
+
+Use this procedure for every writable Execution Lead → Worker dispatch. Orca
+parent/child lineage is orchestration provenance, not proof of Git ancestry; never rely on
+the repository default base for a nested writable Worker.
+
+The Lead first confirms a clean Lead worktree, records `git rev-parse HEAD` as immutable
+`integration_base_sha`, and puts this complete assignment in the Worker Task:
+
+```text
+GOAL
+CONTEXT
+LEAD BRANCH
+INTEGRATION_BASE_SHA
+ALLOWED CHANGED PATHS / SCOPE
+CONSTRAINTS
+VERIFICATION REQUIREMENTS
+RESULT MODE: ORDERED GIT COMMIT LIST
+EXPECTED OUTPUT
+ACCEPTANCE
+```
+
+Make the exact base explicit when creating a local Worker worktree. One version-verified
+low-level Orca path is:
+
+```text
+test -z "$(git status --porcelain)"
+git rev-parse HEAD
+git branch worker-base/<worker_task_id> <integration_base_sha>
+ORCA worktree create --name <worker_name> --base-branch worker-base/<worker_task_id> --agent <agent_id> --setup run --json
+ORCA terminal wait --terminal <worker_handle> --for tui-idle --timeout-ms 60000 --json
+ORCA orchestration dispatch --task <worker_task_id> --to <worker_handle> --inject --json
+```
+
+Read the create receipt and use its exact worktree/terminal identifiers. If the current
+version-matched guide offers a composed `worker-start` path that accepts an explicit
+base ref, it may replace the low-level create/dispatch sequence; omission of the base is
+not allowed.
+
+Before any tracked-file modification, the Worker runs:
+
+```text
+test -z "$(git status --porcelain)"
+git cat-file -e <integration_base_sha>^{commit}
+git rev-parse HEAD
+git rev-parse <integration_base_sha>^{commit}
+test "$(git rev-parse HEAD)" = "$(git rev-parse <integration_base_sha>^{commit})"
+```
+
+The final equality is mandatory. If the declared base does not exist or exact alignment
+cannot be established, the Worker stops and escalates; it must not edit on a guessed base.
+After implementation and required verification, the Worker creates commits and captures
+the immutable result:
+
+```text
+git status --short
+git diff --check
+<required verification commands>
+git add <allowed paths>
+git commit -m "<message>"
+git rev-parse HEAD
+git rev-list --reverse <integration_base_sha>..HEAD
+git diff --name-only <integration_base_sha>..HEAD
+```
+
+The Worker sends `worker_done` with a result packet containing
+`integration_base_sha`, `worker_head_sha`, the ordered commit SHA list, changed paths,
+verification commands/results and unresolved uncertainty. No uncommitted working-tree
+result is accepted.
+
+Before integration, the Lead obtains the exact Worker objects without changing the Lead
+branch, then runs:
+
+```text
+test -z "$(git status --porcelain)"
+git cat-file -e <integration_base_sha>^{commit}
+git cat-file -e <worker_head_sha>^{commit}
+git rev-parse <integration_base_sha>^{commit}
+git rev-parse <expected_integration_base_sha>^{commit}
+git merge-base --is-ancestor <integration_base_sha> <worker_head_sha>
+git rev-list --reverse <integration_base_sha>..<worker_head_sha>
+git diff --name-only <integration_base_sha>..<worker_head_sha>
+git diff --check <integration_base_sha>..<worker_head_sha>
+git diff <integration_base_sha>..<worker_head_sha>
+```
+
+The two base resolutions must be equal; the `rev-list --reverse` output must exactly
+match the returned ordered list. The Lead checks every changed path against the authorized
+scope and rejects unexpected files. After retaining this evidence, V1 has exactly one
+integration operation:
+
+```text
+git cherry-pick <worker_commit_sha_1> <worker_commit_sha_2> ...
+<required verification commands>
+```
+
+Do not merge the Worker branch, reset the Lead branch to Worker HEAD, fast-forward it, take
+over the Worker branch, or infer integration from Orca lineage. The Execution Lead owns
+integration conflicts. The Worker never modifies the Lead worktree. The Lead resolves only
+when the resolution is clearly within the Execution Packet and records it:
+
+```text
+git status --short
+git add <resolved allowed paths>
+git cherry-pick --continue
+<required verification commands>
+```
+
+Otherwise the Lead runs `git cherry-pick --abort` and escalates or redispatches. Required
+verification is rerun after every conflict resolution.
+
+Worker and Lead lifecycle ordering is:
+
+```text
+Worker: implement → verify → commit → send immutable result packet → worker_done
+Lead:   receive result → validate → integrate → verify integrated state → acknowledge
+```
+
+Worker worktree/branch must not be deleted until integration succeeds or the Execution
+Lead explicitly rejects the result. After the immutable result arrives, Orca may release
+the agent/terminal before Delivery acknowledgment, but must keep the Worker branch and
+Git objects recoverable until integration succeeds or the Lead explicitly rejects the
+result. A valid
+`worker_done` is not itself Git acceptance.
+
+For parallel Workers, validate each result independently and serialize integration. After
+each cherry-pick, apply every later ordered commit list onto the new Lead HEAD. The Lead
+owns conflicts; changed-path overlap or semantic interaction that invalidates the original
+acceptance assumptions requires escalation or redispatch.
+
 The Execution Lead re-engages the Root only when:
 
 1. architecture materially changes
@@ -186,6 +321,32 @@ selector. The authoritative Run and Task remain on the coordinator runtime. Do n
 Each Linux node uses its own clone and writable worktrees. Cross-node synchronization uses
 branches, commits, pushes, fetches, pull requests or explicit artifacts—not NFS or a shared
 writable directory.
+
+When the Worker does not share the Lead's Git object database, make the immutable base
+reachable through an explicit fetchable Git ref before dispatch, then exchange only refs:
+
+```text
+# Lead-side publication
+git push <remote> <integration_base_sha>:refs/heads/worker-base/<worker_task_id>
+
+# Worker-side acquisition and mandatory alignment check
+git fetch <remote> refs/heads/worker-base/<worker_task_id>
+git cat-file -e <integration_base_sha>^{commit}
+git rev-parse HEAD
+git rev-parse <integration_base_sha>^{commit}
+
+# Worker-side result publication after commit
+git push <remote> <worker_head_sha>:refs/heads/worker-result/<worker_task_id>
+
+# Lead-side exact result acquisition
+git fetch <remote> refs/heads/worker-result/<worker_task_id>
+git cat-file -e <worker_head_sha>^{commit}
+```
+
+The Lead then performs the same ancestry, ordered-list, scope, diff and verification checks
+from §4.1 and cherry-picks the exact verified commits. Never exchange writable project
+directories between nodes.
+
 
 ## 6. Runtime-Unavailable Degraded Mode
 

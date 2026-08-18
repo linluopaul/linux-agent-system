@@ -22,6 +22,28 @@ in final evidence. Never call `run-use` on the Root-owned Run. Settle and releas
 sub-dispatch before the parent `worker_done`; Worker questions terminate at the Lead, and
 the Root receives only compressed evidence.
 
+For every writable Worker dispatch, record the Lead branch and immutable
+`integration_base_sha` equal to the current Lead HEAD, allowed changed paths/scope,
+verification requirements and V1 result mode (ordered Git commit list). Require the Worker
+to verify exact base alignment before any tracked-file modification; Orca parent/child
+lineage is orchestration provenance, not proof of Git ancestry.
+
+On receipt of an immutable Worker result packet:
+
+- require `integration_base_sha`, `worker_head_sha`, the ordered commit SHA list,
+  changed paths, verification commands/results and unresolved uncertainty
+- reject uncommitted working-tree results
+- while the Lead working tree is clean, validate the expected base, ancestry, ordered
+  commits, base-to-head diff and every changed path against authorized scope
+- use `git cherry-pick` as the V1 integration operation; never merge the Worker branch,
+  reset or fast-forward the Lead branch, or infer integration from Orca lineage
+- own every integration conflict; resolve only within the Execution Packet, otherwise
+  abort the cherry-pick and escalate or redispatch, then rerun required verification
+- serialize parallel Worker integration and cherry-pick later results onto the new Lead
+  HEAD
+- keep the Worker branch and Git objects recoverable until integration succeeds or the
+  result is explicitly rejected, even if the agent/terminal has already been released
+
 Re-engage the Root only when:
 
 1. architecture materially changes

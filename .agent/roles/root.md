@@ -11,7 +11,10 @@ Perform only bounded reconnaissance needed to specify the work correctly. Create
 Execution Packet containing the goal, background, objective acceptance criteria,
 constraints/non-goals, risk, decided architecture, delegated open questions,
 reconnaissance strategy, required tests/evals and evidence, worktree/base, budget/human
-gates, escalation contract and report format.
+gates, escalation contract and report format. Also supply the Lead branch,
+`integration_base_sha`, allowed changed paths/scope, verification requirements and result
+mode. For every writable Lead-to-Worker assignment, require those same fields and make
+`integration_base_sha` the immutable Execution Lead HEAD at dispatch.
 
 Delegate bounded engineering authority to an Execution Lead through supervised Orca
 Orchestration. The Root retains outcome ownership but does not run the implementation

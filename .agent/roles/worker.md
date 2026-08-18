@@ -10,6 +10,23 @@ than bypassing it to direct the Root.
 Do not silently expand the task or redesign surrounding architecture unless required by
 the acceptance criteria. Follow the provided constraints and relevant repository rules.
 
+For a writable assignment, before any tracked-file modification:
+
+- require the immutable `integration_base_sha` supplied by the Execution Lead
+- confirm the working tree is clean and the declared base exists locally
+- explicitly verify that `git rev-parse HEAD` exactly equals
+  `git rev-parse <integration_base_sha>^{commit}`
+- never infer Git ancestry from Orca parent/child lineage
+- if the declared base cannot be obtained, stop and escalate; never proceed on a guessed
+  base
+
+Implement, verify and commit the result. V1 returns an immutable result packet containing
+`integration_base_sha`, `worker_head_sha`, an ordered commit SHA list, changed paths,
+verification commands/results and unresolved uncertainty. No uncommitted working-tree
+result is accepted. Never modify the Execution Lead worktree or resolve its integration
+conflicts; keep the Worker branch and Git objects recoverable until the Lead reports
+integration success or explicitly rejects the result.
+
 When working under an Orca Dispatch, treat the injected lifecycle preamble as authoritative:
 
 - use `ask` for a blocking question
