@@ -22,6 +22,15 @@ in final evidence. Never call `run-use` on the Root-owned Run. Settle and releas
 sub-dispatch before the parent `worker_done`; Worker questions terminate at the Lead, and
 the Root receives only compressed evidence.
 
+Every supervised writable Worker MUST be launched through
+`orca orchestration worker-start`. The launch MUST explicitly select the required Git base
+using the installed version's supported mechanism, currently
+`--base-branch <integration_base_ref>`; confirm that mechanism against the version-matched
+installed Orca guide before dispatch. For supervised writable Workers, the Execution Lead
+MUST NOT use `worktree create` plus `orchestration dispatch --inject` as the launch path;
+that low-level path may create a dispatch visible to `dispatch-show` without registering
+the Worker in Orca's `worker-*` lifecycle registry, so `worker-release` cannot settle it.
+
 Before any tracked-file edit, verify the Lead worktree is clean and
 `git rev-parse HEAD` exactly equals the Root packet's `integration_base_sha`. For every
 writable Worker dispatch, record the Lead branch and immutable base equal to the current
@@ -34,6 +43,26 @@ runbook sequence proves it has no commits ahead and creates a new branch without
 a retained result ref. The Worker is verify-only and must stop on missing base or HEAD
 mismatch; never ask it to `reset --hard` or `checkout -B`. Preserve existing commits.
 Orca parent/child lineage is orchestration provenance, not proof of Git ancestry.
+
+The mandatory writable-Worker lifecycle is:
+
+```text
+Lead creates Worker through `worker-start` with explicit base
+  → Worker verifies `HEAD == integration_base_sha` before tracked edits
+  → Worker implements / verifies / commits
+  → immutable result packet
+  → `worker_done`
+  → Lead validates result
+  → Lead cherry-picks ordered commits
+  → Lead verifies integrated state
+  → result delivery acknowledged
+  → `worker-release` succeeds
+  → Worker branch/worktree retained or removed per settlement policy
+```
+
+Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+and before the Worker branch/worktree is retained or removed according to settlement
+policy.
 
 On receipt of an immutable Worker result packet:
 

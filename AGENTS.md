@@ -268,6 +268,35 @@ dispatch. An existing worktree may be reused only when it is clean and already a
 declared base, or when the guarded runbook procedure proves there are no commits ahead and
 creates a fresh Worker branch without repointing an existing result branch.
 
+Every supervised writable Worker MUST be launched through
+`orca orchestration worker-start`. The launch MUST explicitly select the required Git base
+using the installed version's supported mechanism, currently
+`--base-branch <integration_base_ref>`; confirm that mechanism against the version-matched
+installed Orca guide before dispatch. For supervised writable Workers, the Execution Lead
+MUST NOT use `worktree create` plus `orchestration dispatch --inject` as the launch path;
+that low-level path may create a dispatch visible to `dispatch-show` without registering
+the Worker in Orca's `worker-*` lifecycle registry, so `worker-release` cannot settle it.
+
+The mandatory writable-Worker lifecycle is:
+
+```text
+Lead creates Worker through `worker-start` with explicit base
+  → Worker verifies `HEAD == integration_base_sha` before tracked edits
+  → Worker implements / verifies / commits
+  → immutable result packet
+  → `worker_done`
+  → Lead validates result
+  → Lead cherry-picks ordered commits
+  → Lead verifies integrated state
+  → result delivery acknowledged
+  → `worker-release` succeeds
+  → Worker branch/worktree retained or removed per settlement policy
+```
+
+Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+and before the Worker branch/worktree is retained or removed according to settlement
+policy.
+
 Before any tracked-file modification, the Worker is verify-only: its working tree must be
 clean, the base must exist locally and `git rev-parse HEAD` must exactly equal
 `git rev-parse <integration_base_sha>^{commit}`. If the base cannot be obtained, or if
@@ -303,10 +332,10 @@ stays with the Lead unless it reaches closed condition 3, 5 or 6; evidence that 
 acceptance assumption is false maps to condition 2 or 6.
 
 The Worker worktree/branch must not be deleted until integration succeeds or the Execution
-Lead explicitly rejects the result. Agent/terminal release may follow receipt and Lead-side
-anchoring of the immutable commit result, but its Git objects, branch and anchor must remain
-recoverable until settlement. Delete temporary local/remote result refs only after durable
-SHA mappings and verification evidence are recorded.
+Lead explicitly rejects the result. Agent/terminal release follows result-delivery
+acknowledgment and Lead-side anchoring of the immutable commit result, but its Git objects,
+branch and anchor must remain recoverable until settlement. Delete temporary local/remote
+result refs only after durable SHA mappings and verification evidence are recorded.
 
 If an Execution Lead fails mid-flight, the Root owns parent-Dispatch lifecycle recovery
 and replacement, but it does not enter the failed Lead's edit/verify loop. Preserve the

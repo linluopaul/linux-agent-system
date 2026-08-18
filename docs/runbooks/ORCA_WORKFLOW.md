@@ -163,6 +163,15 @@ Use this procedure for every writable Execution Lead → Worker dispatch. Orca
 parent/child lineage is orchestration provenance, not proof of Git ancestry; never rely on
 the repository default base for a nested writable Worker.
 
+Every supervised writable Worker MUST be launched through
+`orca orchestration worker-start`. The launch MUST explicitly select the required Git base
+using the installed version's supported mechanism, currently
+`--base-branch <integration_base_ref>`; confirm that mechanism against the version-matched
+installed Orca guide before dispatch. For supervised writable Workers, the Execution Lead
+MUST NOT use `worktree create` plus `orchestration dispatch --inject` as the launch path;
+that low-level path may create a dispatch visible to `dispatch-show` without registering
+the Worker in Orca's `worker-*` lifecycle registry, so `worker-release` cannot settle it.
+
 The Lead first confirms a clean Lead worktree, records `git rev-parse HEAD` as immutable
 `integration_base_sha`, and puts this complete assignment in the Worker Task:
 
@@ -179,23 +188,22 @@ EXPECTED OUTPUT
 ACCEPTANCE
 ```
 
-Make the exact base explicit when creating a local Worker worktree. One version-verified
-low-level Orca path is:
+Make the exact base explicit when creating a local Worker worktree. After confirming the
+installed guide supports the current `--base-branch` mechanism, use the composed supervised
+launch path:
 
 ```text
 test -z "$(git status --porcelain)"
 git rev-parse HEAD
 git branch worker-base/<worker_task_id> <integration_base_sha>
-ORCA worktree create --name <worker_name> \
-  --base-branch worker-base/<worker_task_id> --agent <agent_id> --setup run --json
-ORCA terminal wait --terminal <worker_handle> --for tui-idle --timeout-ms 60000 --json
-ORCA orchestration dispatch --task <worker_task_id> --to <worker_handle> --inject --json
+ORCA orchestration worker-start --task <worker_task_id> \
+  --worktree new-child --name <worker_name> \
+  --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 ```
 
-Read the create receipt and use its exact worktree/terminal identifiers. If the current
-version-matched guide offers a composed `worker-start` path that accepts an explicit
-base ref, it may replace the low-level create/dispatch sequence; omission of the base is
-not allowed.
+Set `<integration_base_ref>` to the verified `worker-base/<worker_task_id>` ref (or another
+explicit ref resolving to `integration_base_sha`). Read the `worker-start` receipt and use
+its exact worktree, terminal and Dispatch identifiers. Omission of the base is not allowed.
 
 Alignment is owned by the Lead, not the Worker. The recipe above is the fresh-worktree
 path. To consider an existing worktree, the Lead runs the following **before dispatch**:
@@ -329,15 +337,29 @@ recorded after every conflict resolution or empty-pick skip.
 Worker and Lead lifecycle ordering is:
 
 ```text
-Worker: implement → verify → commit → send immutable result packet → worker_done
-Lead:   receive result → anchor → validate → integrate → verify integrated state → acknowledge
+Lead creates Worker through `worker-start` with explicit base
+  → Worker verifies `HEAD == integration_base_sha` before tracked edits
+  → Worker implements / verifies / commits
+  → immutable result packet
+  → `worker_done`
+  → Lead validates result
+  → Lead cherry-picks ordered commits
+  → Lead verifies integrated state
+  → result delivery acknowledged
+  → `worker-release` succeeds
+  → Worker branch/worktree retained or removed per settlement policy
 ```
+
+Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+and before the Worker branch/worktree is retained or removed according to settlement
+policy.
 
 Worker worktree/branch must not be deleted until integration succeeds or the Execution
 Lead explicitly rejects the result. After the immutable result arrives, the Lead first
-creates the `refs/worker-results/<worker_task_id>` anchor; Orca may then release the
-agent/terminal before Delivery acknowledgment. Worker branch, Git objects and anchor stay
-recoverable until settlement. A valid `worker_done` is not itself Git acceptance.
+creates the `refs/worker-results/<worker_task_id>` anchor. After validation, integration,
+integrated-state verification and Delivery acknowledgment, `worker-release` must succeed.
+Worker branch, Git objects and anchor stay recoverable until settlement. A valid
+`worker_done` is not itself Git acceptance.
 
 After success or explicit rejection, and only after SHA mappings plus verification evidence
 are durable, clean applicable temporary refs:
@@ -428,6 +450,12 @@ reachable through an explicit fetchable Git ref before dispatch, then exchange o
 ```text
 # Lead-side publication
 git push <remote> <integration_base_sha>:refs/heads/worker-base/<worker_task_id>
+
+# Composed supervised launch after publication
+ORCA orchestration worker-start --task <worker_task_id> \
+  --on <saved-environment> --worktree new-top-level \
+  --repo <exact_remote_repo_selector> --name <worker_name> \
+  --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 
 # Remote Worker-side guarded alignment before any tracked-file edit
 test -z "$(git status --porcelain)"

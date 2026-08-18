@@ -26,7 +26,44 @@ not established Git ancestry. Treating the Worker branch as the Lead result coul
 discard Lead work, while a base-to-head review diff would misleadingly report roughly
 2,300 spurious deleted lines.
 
+A later end-to-end smoke test exposed a distinct lifecycle gap. A writable Worker launched
+with low-level `worktree create --base-branch` plus `orchestration dispatch --inject`
+reported a valid `worker_done`, but `worker-release` returned `dispatch_not_found` while
+`dispatch-show` still reported the Dispatch completed. The low-level Dispatch was visible
+without being registered in Orca's `worker-*` lifecycle registry. Separate launches proved
+that `orca orchestration worker-start --base-branch <ref>` both pins the explicit Git base
+and registers the Worker so `worker-release` can settle it.
+
 ## Decision
+
+Every supervised writable Worker MUST be launched through
+`orca orchestration worker-start`. The launch MUST explicitly select the required Git base
+using the installed version's supported mechanism, currently
+`--base-branch <integration_base_ref>`; confirm that mechanism against the version-matched
+installed Orca guide before dispatch. For supervised writable Workers, the Execution Lead
+MUST NOT use `worktree create` plus `orchestration dispatch --inject` as the launch path;
+that low-level path may create a dispatch visible to `dispatch-show` without registering
+the Worker in Orca's `worker-*` lifecycle registry, so `worker-release` cannot settle it.
+
+The mandatory writable-Worker lifecycle is:
+
+```text
+Lead creates Worker through `worker-start` with explicit base
+  → Worker verifies `HEAD == integration_base_sha` before tracked edits
+  → Worker implements / verifies / commits
+  → immutable result packet
+  → `worker_done`
+  → Lead validates result
+  → Lead cherry-picks ordered commits
+  → Lead verifies integrated state
+  → result delivery acknowledged
+  → `worker-release` succeeds
+  → Worker branch/worktree retained or removed per settlement policy
+```
+
+Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+and before the Worker branch/worktree is retained or removed according to settlement
+policy.
 
 Adopt Lead ↔ Worker Git Integration Contract v1 for every writable Worker dispatch:
 
@@ -61,9 +98,9 @@ Adopt Lead ↔ Worker Git Integration Contract v1 for every writable Worker disp
    content is present, records `ALREADY_PRESENT@<lead_head_sha>` plus reason and uses
    `git cherry-pick --skip`, never `--allow-empty`. Unprovable content maps to
    condition 5. Required verification follows every resolution or skip.
-7. Lifecycle order is Worker implement → verify → commit → immutable result →
-   `worker_done`, then Lead receive → anchor → validate → integrate → verify integrated
-   state → acknowledge. Terminal release follows anchoring, but Worker branch, objects and
+7. Lifecycle order is the mandatory 11-step sequence above. The Lead anchors the immutable
+   result before release, acknowledges the result Delivery after integrated-state
+   verification, and then requires `worker-release` to succeed. Worker branch, objects and
    anchor remain recoverable until success or explicit rejection. Temporary refs are
    cleaned only after mappings and verification evidence are durable.
 8. The Lead validates parallel results independently and serializes integration onto the
@@ -117,5 +154,7 @@ Repository policy tests assert exact base equality and safe alignment, normalize
 prohibition clauses, Lead-side ancestry/order/scope/linearity, `cherry-pick -x`
 provenance, SHA mapping, empty-pick handling, closed-condition routes, commit-only Worker
 results, anchored branch retention, remote guarded fetchable refs and the
-Orca-lineage/Git-ancestry distinction. Mutation probes additionally prove the prohibition
-test fails when its normative sentence is removed or inverted.
+Orca-lineage/Git-ancestry distinction. Four lifecycle tests assert the low-level launch
+prohibition, mandatory `worker-start`, explicit base selection and successful
+`worker-release` settlement across every load-bearing document. Removal and inversion
+mutation probes prove each normative rule test fails independently.

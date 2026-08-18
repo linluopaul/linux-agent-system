@@ -24,6 +24,53 @@ def fenced_block_after(document: str, heading: str) -> list[str]:
     return [line.strip() for line in block.strip().splitlines()]
 
 
+WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
+    "AGENTS.md",
+    ".agent/roles/execution-lead.md",
+    "docs/ARCHITECTURE.md",
+    "docs/runbooks/ORCA_WORKFLOW.md",
+    "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
+)
+
+WORKER_START_REQUIREMENT = """
+Every supervised writable Worker MUST be launched through
+`orca orchestration worker-start`.
+"""
+
+EXPLICIT_BASE_REQUIREMENT = """
+The launch MUST explicitly select the required Git base using the installed version's
+supported mechanism, currently `--base-branch <integration_base_ref>`; confirm that
+mechanism against the version-matched installed Orca guide before dispatch.
+"""
+
+LOW_LEVEL_LAUNCH_PROHIBITION = """
+For supervised writable Workers, the Execution Lead MUST NOT use `worktree create` plus
+`orchestration dispatch --inject` as the launch path; that low-level path may create a
+dispatch visible to `dispatch-show` without registering the Worker in Orca's `worker-*`
+lifecycle registry, so `worker-release` cannot settle it.
+"""
+
+WORKER_RELEASE_REQUIREMENT = """
+Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+and before the Worker branch/worktree is retained or removed according to settlement
+policy.
+"""
+
+WRITABLE_WORKER_LIFECYCLE = """
+Lead creates Worker through `worker-start` with explicit base
+  → Worker verifies `HEAD == integration_base_sha` before tracked edits
+  → Worker implements / verifies / commits
+  → immutable result packet
+  → `worker_done`
+  → Lead validates result
+  → Lead cherry-picks ordered commits
+  → Lead verifies integrated state
+  → result delivery acknowledged
+  → `worker-release` succeeds
+  → Worker branch/worktree retained or removed per settlement policy
+"""
+
+
 class ArchitecturePolicyTests(unittest.TestCase):
     def load_yaml(self, relative_path: str):
         if yaml is None:
@@ -354,6 +401,62 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("replays the same oldest Delivery", runbook)
         self.assertIn("check --ack <delivery_id>", architecture)
         self.assertIn("liveness checkpoint", architecture)
+
+    def test_supervised_writable_worker_prohibits_low_level_launch(self) -> None:
+        forbidden_launch = normalize(
+            """
+            ORCA orchestration dispatch --task <worker_task_id>
+            --to <worker_handle> --inject
+            """
+        )
+        for path in WRITABLE_WORKER_LIFECYCLE_DOCUMENTS:
+            document = normalize(read(path))
+            self.assertIn(normalize(LOW_LEVEL_LAUNCH_PROHIBITION), document, path)
+            self.assertNotIn(forbidden_launch, document, path)
+
+    def test_supervised_writable_worker_requires_worker_start(self) -> None:
+        for path in WRITABLE_WORKER_LIFECYCLE_DOCUMENTS:
+            self.assertIn(
+                normalize(WORKER_START_REQUIREMENT),
+                normalize(read(path)),
+                path,
+            )
+
+        local_launch = normalize(
+            """
+            ORCA orchestration worker-start --task <worker_task_id> \\
+            --worktree new-child --name <worker_name> \\
+            --base-branch <integration_base_ref>
+            """
+        )
+        for path in ("docs/ARCHITECTURE.md", "docs/runbooks/ORCA_WORKFLOW.md"):
+            self.assertIn(local_launch, normalize(read(path)), path)
+
+    def test_supervised_writable_worker_requires_explicit_base_selection(self) -> None:
+        for path in WRITABLE_WORKER_LIFECYCLE_DOCUMENTS:
+            self.assertIn(
+                normalize(EXPLICIT_BASE_REQUIREMENT),
+                normalize(read(path)),
+                path,
+            )
+
+        remote_launch = normalize(
+            """
+            ORCA orchestration worker-start --task <worker_task_id> \\
+            --on <saved-environment> --worktree new-top-level \\
+            --repo <exact_remote_repo_selector> --name <worker_name> \\
+            --base-branch <integration_base_ref>
+            """
+        )
+        for path in ("docs/ARCHITECTURE.md", "docs/runbooks/ORCA_WORKFLOW.md"):
+            self.assertIn(remote_launch, normalize(read(path)), path)
+
+    def test_supervised_writable_worker_requires_release_settlement(self) -> None:
+        expected_lifecycle = normalize(WRITABLE_WORKER_LIFECYCLE)
+        for path in WRITABLE_WORKER_LIFECYCLE_DOCUMENTS:
+            document = normalize(read(path))
+            self.assertIn(normalize(WORKER_RELEASE_REQUIREMENT), document, path)
+            self.assertIn(expected_lifecycle, document, path)
 
     def test_writable_worker_requires_exact_integration_base(self) -> None:
         documents = {
