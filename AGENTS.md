@@ -201,6 +201,9 @@ The default model/provider-pool preferences are:
 
 Availability, capability, budget and task evidence may justify another harness or pool.
 
+Reasoning/thinking effort is not a token-savings lever: low-cost pools keep high or
+provider-recommended effort, and savings come from routing and context discipline only.
+
 Efficiency and terse reporting are native principles defined in
 `.agent/policies/efficiency.yaml`; never narrate routine tool usage. Efficiency targets
 never weaken acceptance criteria, HIGH-risk safeguards, independence or human gates — see

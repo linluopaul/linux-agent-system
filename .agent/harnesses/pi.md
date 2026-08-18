@@ -36,3 +36,8 @@ Model identity is runtime data. The routing.yaml `model_pools` section records t
 harness may select from (e.g. `volcengine_ark_coding_plan`, `deepseek`, `claude`, `codex`,
 `min_max`, `kimi`, `gemini`). Which pool is used is a routing decision, never a fixed
 property of the Pi harness.
+
+Selecting a low-cost pool does NOT imply lowering thinking/reasoning effort. Reasoning
+effort is a correctness parameter, not a cost lever: low-cost pools keep HIGH or
+provider-recommended reasoning effort, and cost is optimized through routing and context
+discipline, never by reducing reasoning effort.

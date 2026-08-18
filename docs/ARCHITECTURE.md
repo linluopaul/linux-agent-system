@@ -984,8 +984,11 @@ Packet fields 的语义：
 
 - `EXECUTION HARNESS`：Root 选择的 Execution Lead harness class（默认 Pi Standard/Fast，
   困难工作用 Codex Premium）；默认选择写入 `.agent/harnesses/` 与 `routing.yaml`；
-- `MODEL POLICY`：首次成本、模型池 与 fallback pool（见 `routing.yaml` `model_pools`），
-  并允许在 deterministic 证据证明不足时升级；Pi 的模型是 runtime 选的，不是固定模型；
+- `MODEL POLICY`：选择模型池与 fallback pool（见 `routing.yaml` `model_pools`），
+  并允许在 deterministic 证据证明不足时升级；Pi 的模型是 runtime 选的，不是固定模型。
+  MODEL POLICY **不** 通过降低 reasoning/thinking effort 来省 token——reasoning effort 是
+  correctness 参数而非 cost 参数；low-cost pools 保持 high 或 provider-recommended 的
+  reasoning effort，成本经由 routing 与 context discipline 优化；
 - `CAPABILITY PROFILE`：只声明 task 需要的 capability，遵循 least capability 与
   progressive disclosure（`.agent/policies/capabilities.yaml`）；
 - `EFFICIENCY PROFILE`：`standard-low-cost` 等，执行效率与 terse reporting 规则
@@ -1017,7 +1020,7 @@ CONSTRAINTS
 VERIFICATION REQUIREMENTS
 RESULT MODE
 EXECUTION HARNESS (REDUCED)
-MODEL POLICY (REDUCED)
+MODEL POLICY (LOW-COST POOL, HIGH REASONING EFFORT)
 CAPABILITY PROFILE
 EFFICIENCY PROFILE
 OUTPUT MODE

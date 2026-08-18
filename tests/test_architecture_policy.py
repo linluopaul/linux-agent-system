@@ -1136,6 +1136,36 @@ class ArchitecturePolicyTests(unittest.TestCase):
             adr,
         )
 
+    def test_reasoning_effort_is_not_a_token_savings_lever(self) -> None:
+        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+
+        # No efficiency profile sets reduced/low reasoning.
+        for profile in efficiency["profiles"].values():
+            self.assertNotIn(
+                profile.get("reasoning"), ("reduced", "low"), profile
+            )
+
+        # efficiency.yaml names reasoning/thinking effort as excluded from cost levers.
+        self.assertIn(
+            "reasoning_effort_is_not_a_token_savings_lever", efficiency["principles"]
+        )
+        text = read(".agent/policies/efficiency.yaml").lower()
+        self.assertIn("not a token-savings lever", text)
+        self.assertIn("not a cost parameter", text)
+
+        # The approved cost levers are enumerated.
+        cost_levers = efficiency["cost_levers"]
+        for lever in (
+            "cheaper_model_routing",
+            "targeted_context",
+            "progressive_disclosure_skills",
+            "task_bounded_sessions",
+            "terse_reporting",
+            "deterministic_verification",
+            "premium_model_avoidance",
+        ):
+            self.assertIn(lever, cost_levers)
+
     def test_efficiency_policy_does_not_weaken_high_risk_guardrails(self) -> None:
         efficiency = read(".agent/policies/efficiency.yaml")
         self.assertIn("NOT weaken the HIGH-risk", efficiency)
