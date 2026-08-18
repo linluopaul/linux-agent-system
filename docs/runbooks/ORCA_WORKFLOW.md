@@ -106,11 +106,18 @@ Codex is the preferred first-class Execution Lead / Engineering Control Plane. T
 uses Orca Orchestration to delegate bounded execution authority without transferring
 outcome ownership:
 
+Every supervised writable Root-to-Execution-Lead dispatch MUST be launched through
+`orca orchestration worker-start`; low-level `worktree create` plus
+`orchestration dispatch --inject` does not register the Lead in Orca's `worker-*` lifecycle
+registry, so the Root cannot settle it with `worker-release`.
+
 ```text
 Root terminal:
 ORCA orchestration run-create --objective "<task outcome>" --json
 ORCA orchestration task-create --spec "<Execution Packet>" --json
-ORCA orchestration worker-start --task <parent_task_id> ... --json
+ORCA orchestration worker-start --task <parent_task_id> \
+  --worktree new-child --name <lead_name> \
+  --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 ORCA orchestration check --wait ... --json
 process every message in the Delivery
 ORCA orchestration worker-release --dispatch <lead_dispatch_id> --json
@@ -146,7 +153,9 @@ installed and verified grammar from the Execution Lead terminal:
 ORCA orchestration run-create --objective \
   "Execution sub-run for parent Task <task_id>, Dispatch <dispatch_id>" --json
 ORCA orchestration task-create --run <lead_run_id> --spec "<bounded worker task>" --json
-ORCA orchestration worker-start --task <worker_task_id> ... --json
+ORCA orchestration worker-start --task <worker_task_id> \
+  --worktree new-child --name <worker_name> \
+  --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 ORCA orchestration check --wait --types worker_done,escalation,question ... --json
 ORCA orchestration worker-release --dispatch <worker_dispatch_id> --json
 ORCA orchestration check --ack <delivery_id> ... --json
@@ -204,6 +213,14 @@ ORCA orchestration worker-start --task <worker_task_id> \
 Set `<integration_base_ref>` to the verified `worker-base/<worker_task_id>` ref (or another
 explicit ref resolving to `integration_base_sha`). Read the `worker-start` receipt and use
 its exact worktree, terminal and Dispatch identifiers. Omission of the base is not allowed.
+
+When `worker-start` targets `current`, an existing worktree, or `--terminal <handle>`, the
+installed CLI rejects `--base-branch`; explicit base selection is satisfied only by the
+guarded pre-dispatch HEAD equality proof recorded in the assignment. `--retry-of
+<dispatch_id>` does not inherit placement: repeat the intended `--on`/`--worktree` and
+`--agent`/`--terminal` choices, and either repeat
+`--base-branch <integration_base_ref>` for a new worktree or rerun and record the guarded
+equality proof for reuse.
 
 Alignment is owned by the Lead, not the Worker. The recipe above is the fresh-worktree
 path. To consider an existing worktree, the Lead runs the following **before dispatch**:
@@ -345,20 +362,22 @@ Lead creates Worker through `worker-start` with explicit base
   → Lead validates result
   → Lead cherry-picks ordered commits
   → Lead verifies integrated state
-  → result delivery acknowledged
   → `worker-release` succeeds
+  → result delivery acknowledged
   → Worker branch/worktree retained or removed per settlement policy
 ```
 
-Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+Settlement MUST include successful `worker-release` before result-delivery acknowledgment
 and before the Worker branch/worktree is retained or removed according to settlement
 policy.
+Orca replays an unacknowledged Delivery, so the writable Worker terminal MUST be
+successfully released before the batch is acknowledged.
 
 Worker worktree/branch must not be deleted until integration succeeds or the Execution
 Lead explicitly rejects the result. After the immutable result arrives, the Lead first
 creates the `refs/worker-results/<worker_task_id>` anchor. After validation, integration,
-integrated-state verification and Delivery acknowledgment, `worker-release` must succeed.
-Worker branch, Git objects and anchor stay recoverable until settlement. A valid
+integrated-state verification and before Delivery acknowledgment, `worker-release` must
+succeed. Worker branch, Git objects and anchor stay recoverable until settlement. A valid
 `worker_done` is not itself Git acceptance.
 
 After success or explicit rejection, and only after SHA mappings plus verification evidence

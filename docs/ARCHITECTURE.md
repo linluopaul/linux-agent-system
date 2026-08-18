@@ -446,6 +446,14 @@ ORCA orchestration worker-start --task <worker_task_id> \
   --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 ```
 
+When `worker-start` targets `current`, an existing worktree, or `--terminal <handle>`, the
+installed CLI rejects `--base-branch`; explicit base selection is satisfied only by the
+guarded pre-dispatch HEAD equality proof recorded in the assignment. `--retry-of
+<dispatch_id>` does not inherit placement: repeat the intended `--on`/`--worktree` and
+`--agent`/`--terminal` choices, and either repeat
+`--base-branch <integration_base_ref>` for a new worktree or rerun and record the guarded
+equality proof for reuse.
+
 1. **Integration base。** Root → Lead Execution Packet 的 immutable
    `integration_base_sha` 是 Lead worktree 在任何 tracked-file edit 前必须精确匹配的
    commit；`WORKTREE / BASE COMMIT` 只描述 placement 与用于创建它的 source ref。每个
@@ -505,21 +513,23 @@ ORCA orchestration worker-start --task <worker_task_id> \
      → Lead validates result
      → Lead cherry-picks ordered commits
      → Lead verifies integrated state
-     → result delivery acknowledged
      → `worker-release` succeeds
+     → result delivery acknowledged
      → Worker branch/worktree retained or removed per settlement policy
    ```
 
-   Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+   Settlement MUST include successful `worker-release` before result-delivery acknowledgment
    and before the Worker branch/worktree is retained or removed according to settlement
    policy.
+   Orca replays an unacknowledged Delivery, so the writable Worker terminal MUST be
+   successfully released before the batch is acknowledged.
    Worker worktree/branch must not be deleted until integration succeeds or the Execution
    Lead explicitly rejects the result。收到 immutable result 后，Lead 必须在 agent/terminal
    release 前创建 `refs/worker-results/<worker_task_id>` anchor；在 result Delivery
-   acknowledgment 后执行 `worker-release`。Worker branch、Git objects 与 anchor 必须保持
-   recoverable 直到 settlement。只有 mapping 与 verification evidence durable、result
-   accepted/rejected 后，Lead 才删除 local anchor 以及 local/remote `worker-base/<task>`、
-   `worker-result/<task>` temporary refs。
+   acknowledgment 前成功执行 `worker-release`。Worker branch、Git objects 与 anchor 必须
+   保持 recoverable 直到 settlement。只有 mapping 与 verification evidence durable、
+   result accepted/rejected 后，Lead 才删除 local anchor 以及 local/remote
+   `worker-base/<task>`、`worker-result/<task>` temporary refs。
 8. **Parallel Workers。** Lead 独立验证每份 result 并 serialize integration。每次
    integration 后，later Worker ordered commits 都 re-cherry-pick onto the new Lead HEAD；
    conflict 仍归 Lead。每次 cherry-pick 后都运行 integrated-state required verification；
@@ -975,10 +985,13 @@ coordinator: Root terminal             coordinator: Execution Lead terminal
                      with compressed evidence
 ```
 
-Root 先 create/bind Run，再 create Task，之后使用 version-matched
-`worker-start` 或低层 dispatch 把 Execution Packet 交给 Execution Lead。等待期间使用
-long structured `check --wait` windows，不做固定 sleep/poll loop、频繁 terminal read
-或 step-by-step direction。
+Root 先 create/bind Run，再 create Task，并通过 version-matched `worker-start` 与显式
+base selection 把 Execution Packet 交给 Execution Lead。Every supervised writable
+Root-to-Execution-Lead dispatch MUST be launched through `orca orchestration worker-start`;
+low-level `worktree create` plus `orchestration dispatch --inject` does not register the
+Lead in Orca's `worker-*` lifecycle registry, so the Root cannot settle it with
+`worker-release`. 等待期间使用 long structured `check --wait` windows，不做固定
+sleep/poll loop、频繁 terminal read 或 step-by-step direction。
 
 Installed Orca 1.4.184 的 version-matched guide 与 CLI help 验证了以下 Lead topology：
 
@@ -990,8 +1003,8 @@ ORCA orchestration worker-start --task <worker_task_id> \
   --worktree new-child --name <worker_name> \
   --base-branch <integration_base_ref> --agent <agent_id> --setup run --json
 ORCA orchestration check --wait --types worker_done,escalation,question ... --json
-ORCA orchestration check --ack <delivery_id> ... --json
 ORCA orchestration worker-release --dispatch <worker_dispatch_id> --json
+ORCA orchestration check --ack <delivery_id> ... --json
 ```
 
 `run-create` 从 Execution Lead terminal 创建并绑定 Lead-owned Run；`task-create --run`
@@ -1007,10 +1020,9 @@ immutable result packet；Root 不直接消费 Worker transcript 或 Worker inbo
 message；对每个有效
 `worker_done`，在 acknowledgment 前选择 terminal 的下一 owner：
 
-- 立即把同一个 agent terminal 转移到 follow-up Dispatch；或
-- 对 non-writable Worker 按 current guide 执行 `worker-release`，对 writable Worker
-  选择 §5.4 的 post-ack release；或
-- 用户明确要求时 `worker-retain`。
+- writable Worker 按 §5.4 必须成功执行 `worker-release`；或
+- 仅对 non-writable Worker，立即把同一个 agent terminal 转移到 follow-up Dispatch；或
+- 仅对 non-writable Worker，在用户明确要求时执行 `worker-retain`。
 
 完成整个 batch 后才 ack，再继续 wait。wait timeout 或 `{count:0}` 只是 liveness
 checkpoint，不是 Worker failure。不能因为 timeout、TUI idle、status 或 heartbeat
@@ -1027,8 +1039,8 @@ Lead creates Worker through `worker-start` with explicit base
   → Lead validates result
   → Lead cherry-picks ordered commits
   → Lead verifies integrated state
-  → result delivery acknowledged
   → `worker-release` succeeds
+  → result delivery acknowledged
   → Worker branch/worktree retained or removed per settlement policy
 ```
 
@@ -1036,7 +1048,7 @@ Lead 按 §5.4 在 acknowledgment 前完成 base/ancestry/scope/diff validation�
 linear `cherry-pick -x`、worker→integrated SHA mapping 与 integrated-state
 verification。immutable result 已收到后可以按 Orca lifecycle release agent/terminal，
 但 release 前须创建 Lead-owned anchor，并且 writable Worker 要在 result Delivery
-acknowledgment 后成功执行 `worker-release`；Worker Git objects、branch 与 anchor 保持
+acknowledgment 前成功执行 `worker-release`；Worker Git objects、branch 与 anchor 保持
 recoverable，直到 integration 成功或 Lead 明确 reject result。只有 SHA mapping 与
 verification evidence durable 后才清理 temporary refs。
 

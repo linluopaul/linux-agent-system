@@ -31,6 +31,14 @@ MUST NOT use `worktree create` plus `orchestration dispatch --inject` as the lau
 that low-level path may create a dispatch visible to `dispatch-show` without registering
 the Worker in Orca's `worker-*` lifecycle registry, so `worker-release` cannot settle it.
 
+When `worker-start` targets `current`, an existing worktree, or `--terminal <handle>`, the
+installed CLI rejects `--base-branch`; explicit base selection is satisfied only by the
+guarded pre-dispatch HEAD equality proof recorded in the assignment. `--retry-of
+<dispatch_id>` does not inherit placement: repeat the intended `--on`/`--worktree` and
+`--agent`/`--terminal` choices, and either repeat
+`--base-branch <integration_base_ref>` for a new worktree or rerun and record the guarded
+equality proof for reuse.
+
 Before any tracked-file edit, verify the Lead worktree is clean and
 `git rev-parse HEAD` exactly equals the Root packet's `integration_base_sha`. For every
 writable Worker dispatch, record the Lead branch and immutable base equal to the current
@@ -55,14 +63,16 @@ Lead creates Worker through `worker-start` with explicit base
   → Lead validates result
   → Lead cherry-picks ordered commits
   → Lead verifies integrated state
-  → result delivery acknowledged
   → `worker-release` succeeds
+  → result delivery acknowledged
   → Worker branch/worktree retained or removed per settlement policy
 ```
 
-Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+Settlement MUST include successful `worker-release` before result-delivery acknowledgment
 and before the Worker branch/worktree is retained or removed according to settlement
 policy.
+Orca replays an unacknowledged Delivery, so the writable Worker terminal MUST be
+successfully released before the batch is acknowledged.
 
 On receipt of an immutable Worker result packet:
 

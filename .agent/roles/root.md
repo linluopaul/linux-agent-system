@@ -30,6 +30,13 @@ edit/verify/fix loop, choose routine local design details, or micromanage implem
 Supervise with long `check --wait` windows and accept compressed evidence rather than full
 transcripts or reasoning dumps.
 
+Every supervised writable Root-to-Execution-Lead dispatch MUST be launched through
+`orca orchestration worker-start`; low-level `worktree create` plus
+`orchestration dispatch --inject` does not register the Lead in Orca's `worker-*` lifecycle
+registry, so the Root cannot settle it with `worker-release`. After an accepted
+`worker_done`, settle the Lead terminal with successful `worker-release` before
+acknowledging the Delivery because Orca replays an unacknowledged Delivery.
+
 Re-enter execution only when:
 
 1. architecture materially changes

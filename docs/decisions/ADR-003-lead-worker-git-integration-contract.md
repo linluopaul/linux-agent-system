@@ -56,14 +56,16 @@ Lead creates Worker through `worker-start` with explicit base
   → Lead validates result
   → Lead cherry-picks ordered commits
   → Lead verifies integrated state
-  → result delivery acknowledged
   → `worker-release` succeeds
+  → result delivery acknowledged
   → Worker branch/worktree retained or removed per settlement policy
 ```
 
-Settlement MUST include successful `worker-release` after result-delivery acknowledgment
+Settlement MUST include successful `worker-release` before result-delivery acknowledgment
 and before the Worker branch/worktree is retained or removed according to settlement
 policy.
+Orca replays an unacknowledged Delivery, so the writable Worker terminal MUST be
+successfully released before the batch is acknowledged.
 
 Adopt Lead ↔ Worker Git Integration Contract v1 for every writable Worker dispatch:
 
@@ -99,9 +101,9 @@ Adopt Lead ↔ Worker Git Integration Contract v1 for every writable Worker disp
    `git cherry-pick --skip`, never `--allow-empty`. Unprovable content maps to
    condition 5. Required verification follows every resolution or skip.
 7. Lifecycle order is the mandatory 11-step sequence above. The Lead anchors the immutable
-   result before release, acknowledges the result Delivery after integrated-state
-   verification, and then requires `worker-release` to succeed. Worker branch, objects and
-   anchor remain recoverable until success or explicit rejection. Temporary refs are
+   result before release, requires `worker-release` to succeed after integrated-state
+   verification, and only then acknowledges the result Delivery. Worker branch, objects
+   and anchor remain recoverable until success or explicit rejection. Temporary refs are
    cleaned only after mappings and verification evidence are durable.
 8. The Lead validates parallel results independently and serializes integration onto the
    new Lead HEAD, running integrated-state verification after every result. Verification
