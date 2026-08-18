@@ -1,33 +1,116 @@
 # Model routing preferences.
 # These are preferences, not permanent provider-role bindings.
+# Capability, availability, risk evidence and budget may justify fallback.
+#
+# risk.yaml is authoritative for whether independent review or a human gate is required.
+# This file chooses providers after those requirements are known. A risk-level preference
+# overrides the same default role key; omitted keys inherit from defaults.
+
+defaults:
+  preferred_root:
+    - claude
+    - codex
+    - deepseek
+  preferred_execution_lead:
+    - codex
+    - deepseek
+    - claude
+  preferred_worker:
+    - deepseek
+    - codex
+    - claude
+  preferred_specialist:
+    - claude
+    - codex
+  preferred_reviewer:
+    - claude
+    - codex
+
+work_preferences:
+  architecture_consultation:
+    - claude
+    - codex
+  difficult_diagnosis:
+    - claude
+    - codex
+  ambiguity_resolution:
+    - claude
+    - codex
+  independent_high_risk_review:
+    - claude
+    - codex
+  cross_provider_high_risk_review:
+    - claude
+    - codex
 
 risk:
   low:
     preferred_root:
-      - deepseek
       - claude
       - codex
+      - deepseek
+    preferred_execution_lead:
+      - codex
+      - deepseek
+      - claude
+    preferred_worker:
+      - deepseek
+      - codex
+      - claude
     independent_review: false
 
   medium:
     preferred_root:
       - claude
       - codex
+      - deepseek
+    preferred_execution_lead:
+      - codex
+      - deepseek
+      - claude
     preferred_worker:
       - deepseek
+      - codex
+      - claude
+    preferred_specialist:
+      - claude
+      - codex
+    preferred_reviewer:
+      - claude
+      - codex
     independent_review: conditional
 
   high:
     preferred_root:
       - claude
       - codex
+      - deepseek
+    preferred_execution_lead:
+      - codex
+      - claude
+      - deepseek
     preferred_worker:
       - deepseek
+      - codex
+      - claude
+    preferred_specialist:
+      - claude
+      - codex
+    preferred_reviewer:
+      - claude
+      - codex
     independent_review: required
+    reviewer_provider_diversity: cross_provider_or_human_visible_residual_risk_waiver
 
 principles:
   - use_cheapest_capable_resource
   - prefer_deterministic_tools_before_model_calls
+  - claude_is_default_root_preference
+  - codex_is_default_execution_lead_preference
+  - deepseek_is_preferred_for_well_scoped_worker_tasks
+  - root_reentry_is_limited_to_the_closed_escalation_list
+  - normal_execution_usage_substantially_exceeds_root_usage
+  - root_does_not_run_the_implementation_edit_verify_fix_loop
   - preserve_premium_capacity_for_high_value_reasoning
   - allow_provider_fallback
   - do_not_permanently_bind_provider_to_role

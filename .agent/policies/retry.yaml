@@ -18,3 +18,9 @@
 #
 # Quantitative retry limits will be defined after manual workflow data
 # has been collected.
+
+execution_lead_failure:
+  lifecycle_recovery_owner: root_parent_run_coordinator
+  resumed_edit_verify_loop_owner: replacement_execution_lead
+  worktree_policy: preserve_until_prior_terminal_is_inactive_and_ownership_is_reassigned
+  uncommitted_work_policy: preserve_and_transfer_to_replacement_execution_lead
