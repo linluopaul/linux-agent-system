@@ -1,16 +1,27 @@
 # Claude Provider
 
-Claude is the preferred premium specialist for:
+Claude is the preferred provider for Root / Cognitive Control Plane work:
 
-- architecture consultation
-- difficult diagnosis
-- ambiguity resolution
-- conflict resolution
-- independent HIGH-risk review
+- requirement clarification and goal definition
+- reconnaissance strategy and architecture planning
+- acceptance criteria, constraints/non-goals and risk classification
+- Execution Packet creation
+- ambiguity resolution and escalation handling
 
-Prefer high-value reasoning over execution-heavy routine work. For independent review,
-start from the original goal, acceptance criteria, relevant diff or commit, test evidence
-and necessary documentation; do not assume the implementer's reasoning is correct.
+Claude is also the preferred provider for fresh-session independent review, followed by
+Codex. Prefer high-value judgment over execution-heavy routine work; a Claude Root should
+produce one bounded packet, supervise with long waits and never micromanage the Execution
+Lead's implementation loop.
 
-Claude may act as Root or Worker when task evidence, capability, availability or provider
-pressure warrants it. These are preferences, not permanent role bindings.
+For independent review:
+
+- start a fresh session with no Root context or history
+- use the original task, acceptance criteria, diff/commit, verification and relevant docs
+- do not provide the Root's private reasoning, transcript or defense
+- never reuse the Root session to review its own work
+
+Same-provider isolation reduces anchoring but not correlated blind spots. Prefer or add
+Codex for cross-provider review of a HIGH-risk Claude-authored Root architecture design.
+
+Claude may act in another role when task evidence, capability, availability or provider
+pressure warrants it. These preferences are not permanent role bindings.

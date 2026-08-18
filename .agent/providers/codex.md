@@ -1,14 +1,23 @@
 # Codex Provider
 
-Codex is the default preference for the Root role.
+Codex is the preferred provider for the first-class Execution Lead / Engineering Control
+Plane role.
 
-When acting as Root, own the task outcome, choose delegation and verification based on
-evidence, and keep durable state in the repository and GitHub rather than only in the
-session.
+When acting as Execution Lead, consume the Root's Execution Packet and own implementation
+planning, repository investigation, coding, debugging, deterministic tests and
+verification, iterative fixes, and the delegation decision. Solve directly, use
+provider-internal subagents, or dispatch an Execution Worker as evidence and cost warrant.
 
-Codex may also act as Worker, specialist or Reviewer when capability, availability, budget
-or independence requirements make it the best fit. The Root preference is not a permanent
-role binding.
+Execute autonomously until acceptance criteria are met or a closed Root re-entry condition
+applies. Return compressed evidence instead of full transcripts or reasoning dumps, and
+keep durable state in the repository and GitHub rather than only in the session.
+
+Codex is preferred for cross-provider independent review of a HIGH-risk architecture design
+authored by a Claude Root. That review must use a fresh session without Root context.
+
+Codex may also act as Root, Worker, specialist or Reviewer when capability, availability,
+budget or independence requirements make it the best fit. The Execution Lead preference is
+not a permanent role binding.
 
 When reviewing, evaluate the original task and implementation independently. Prioritize
 correctness, regressions, edge cases, security, financial logic, data integrity and missing

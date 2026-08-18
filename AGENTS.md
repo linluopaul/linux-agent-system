@@ -52,23 +52,61 @@ Important project knowledge must not exist only inside an agent session.
 
 One Root Agent owns one task outcome.
 
-The Root Agent may dynamically decide whether to:
+The Root is the Cognitive Control Plane. It owns requirement clarification, goal
+definition, reconnaissance strategy, architecture planning, acceptance criteria,
+constraints and non-goals, risk classification, Execution Packet creation, ambiguity
+resolution and escalation handling. It remains accountable for the final outcome.
 
-- solve the task directly
-- investigate first
-- delegate work
-- parallelize independent work
-- request independent review
-- escalate to another provider
+The Execution Lead is the Engineering Control Plane. The Root delegates bounded execution
+authority to it through a supervised Orca Dispatch without transferring outcome ownership.
+The Execution Lead owns implementation planning, repository investigation, coding,
+debugging, tests and verification, iterative fixes, and the decision to solve directly,
+use provider-internal subagents, or dispatch an Execution Worker.
 
-Do not create agents merely to satisfy a fixed workflow.
+The Execution Lead is a first-class role, not an ordinary Worker. Its distinguishing
+property is delegation authority: an Execution Lead may decompose work and dispatch
+Workers; a Worker may not. Do not create agents merely to satisfy a fixed workflow.
 
-Give agents outcomes, constraints and acceptance criteria rather than
-a manually prescribed reasoning process.
+Give the Execution Lead outcomes, constraints and acceptance criteria rather than a
+manually prescribed reasoning process. It executes autonomously until acceptance criteria
+are met or a closed escalation condition applies.
+
+## Execution Packet and Escalation
+
+The Execution Packet is the Root's primary work product and the sole normal interface from
+Root to Execution Lead. It contains:
+
+```text
+GOAL
+BACKGROUND / PROBLEM STATEMENT
+ACCEPTANCE CRITERIA
+CONSTRAINTS / NON-GOALS
+RISK: LOW | MEDIUM | HIGH
+ARCHITECTURE DECISIONS
+OPEN QUESTIONS DELEGATED
+RECONNAISSANCE STRATEGY
+REQUIRED TESTS / EVALS
+VERIFICATION EVIDENCE REQUIRED
+WORKTREE / BASE COMMIT
+BUDGET / HUMAN GATES
+ESCALATION CONTRACT
+EXPECTED REPORT FORMAT
+```
+
+The Execution Lead re-engages the Root only when one of these five conditions applies:
+
+1. architecture materially changes
+2. acceptance criteria are ambiguous
+3. difficult diagnosis remains unresolved
+4. HIGH-risk independent review is required
+5. deterministic verification cannot resolve uncertainty
+
+This is a closed Root re-entry list. Routine implementation choices, test failures,
+refactors, tooling problems and local design details remain with the Execution Lead.
 
 ## Delegation
 
-Prefer delegation when work:
+The Execution Lead decides whether to delegate. Prefer an Execution Worker when work:
 
 - can be independently specified
 - can run in parallel
@@ -78,6 +116,9 @@ Prefer delegation when work:
 
 Avoid delegation when coordination and handoff cost exceeds the likely
 benefit.
+
+Execution Workers are normally dispatched by the Execution Lead. They receive bounded
+scope and return concise evidence; they do not delegate further or expand architecture.
 
 ## Cost Policy
 
@@ -97,12 +138,30 @@ Provider roles are preferences, not permanent bindings.
 
 The default provider preferences are:
 
-- Codex for the Root role
-- DeepSeek for low-cost, well-scoped implementation, search and testing work
-- Claude for architecture consultation, difficult diagnosis, ambiguity resolution and
-  independent HIGH-risk review
+- Claude for Root / Cognitive Control Plane work
+- Codex for Execution Lead / Engineering Control Plane work
+- DeepSeek for low-cost, well-scoped Execution Worker implementation, search, test
+  generation and mechanical refactoring
+- Claude, then Codex, for fresh-session independent review
+- Codex for cross-provider review of a Claude-authored Root architecture design
 
 Availability, capability, budget and task evidence may justify another provider.
+
+Normal total Codex execution usage must substantially exceed Claude Root usage. Enforce
+that cost asymmetry structurally:
+
+- Root reconnaissance is bounded to what is needed to specify the work correctly; reading
+  the whole codebase to prepare a packet is an anti-pattern.
+- The Root does not run the implementation edit/verify/fix loop; the Execution Lead owns
+  that loop.
+- The default is one Execution Packet per task. Iterative fixes remain inside the
+  Execution Lead's dispatch.
+- The Execution Lead reports compressed evidence—files changed, commands, results,
+  findings and uncertainty—rather than transcripts or reasoning dumps.
+- The Root supervises with long `check --wait` windows. Frequent status polling, terminal
+  reading or step-by-step direction is the **Root micromanagement** anti-pattern.
+- Escalations are bounded exchanges: one specific question and one specific decision, not
+  a transfer of the implementation loop to the Root.
 
 ## Runtime and Controller Boundaries
 
@@ -157,11 +216,16 @@ Do not weaken tests merely to make them pass.
 
 Prefer executable verification over prose review whenever possible.
 
-Independent reviewers should receive the original task, acceptance
-criteria, relevant diff or commit, tests and necessary documentation.
+Review independence means fresh-session context independence. The reviewer runs in its
+own worktree or terminal with no Root session context or history. It receives the original
+task, acceptance criteria, relevant diff or commit, verification evidence, required docs
+and risk level, but not the Root's private reasoning or transcript, Execution Packet
+rationale, implementer reasoning, or the Root's defense of its design.
 
-Do not automatically provide the implementer's full reasoning to an
-independent reviewer.
+A Root session must never review its own work, and any session carrying the Root's context
+is not independent. A fresh session using the same provider still has residual correlated
+blind-spot risk. When the HIGH-risk artifact is the Root's own architecture design, prefer
+or add a cross-provider reviewer and record that residual risk in the task report.
 
 ## Git Rules
 

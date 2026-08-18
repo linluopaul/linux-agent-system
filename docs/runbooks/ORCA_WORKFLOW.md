@@ -28,28 +28,38 @@ runtime is reachable and, before relying on structured coordination, confirm the
 Orchestration experimental feature is enabled in Orca Settings > Experimental on every
 participating installation.
 
-## 2. Prepare the Durable Task Packet
+## 2. Prepare the Execution Packet
 
-The GitHub Issue or equivalent durable task record should contain:
+The Root / Cognitive Control Plane is preferably Claude. It performs bounded
+reconnaissance—only enough reading to specify the work correctly—and produces one
+Execution Packet as the sole normal Root-to-Execution-Lead interface:
 
 ```text
 GOAL
-ACCEPTANCE CRITERIA
+BACKGROUND / PROBLEM STATEMENT
+ACCEPTANCE CRITERIA          (objective and checkable)
 CONSTRAINTS / NON-GOALS
 RISK: LOW | MEDIUM | HIGH
-BUDGET / HUMAN GATES
-RELEVANT DOCS
+ARCHITECTURE DECISIONS
+OPEN QUESTIONS DELEGATED
+RECONNAISSANCE STRATEGY
 REQUIRED TESTS / EVALS
-BASE REF
+VERIFICATION EVIDENCE REQUIRED
+WORKTREE / BASE COMMIT
+BUDGET / HUMAN GATES
+ESCALATION CONTRACT
+EXPECTED REPORT FORMAT
 ```
 
 The Controller may poll, claim, classify policy and choose an eligible node. GitHub remains
-authoritative for task state.
+authoritative for task state. Reading the entire codebase to prepare the packet is an
+anti-pattern; repository investigation belongs to the Execution Lead.
 
 ## 3. Create or Select the Root Workspace
 
-Codex is the default Root preference. Use an Orca-managed worktree for each writable task.
-Choose worktree lineage separately from the Git base:
+Claude is the preferred Root provider. Use an Orca-managed workspace for the Root and an
+Orca-managed worktree for each writable task. Choose worktree lineage separately from the
+Git base:
 
 - use a child worktree for work stacked on or dependent on the active task
 - use a top-level worktree for an independent task
@@ -58,9 +68,11 @@ Choose worktree lineage separately from the Git base:
 Use Orca's agent-first worktree creation when a new Root is needed and follow the current
 guide's setup policy. Do not replace it with raw `git worktree` plus an ad hoc PTY.
 
-## 4. Delegate Supervised Work
+## 4. Dispatch the Execution Lead
 
-When the Root must receive and integrate a result, use Orca Orchestration:
+Codex is the preferred first-class Execution Lead / Engineering Control Plane. The Root
+uses Orca Orchestration to delegate bounded execution authority without transferring
+outcome ownership:
 
 ```text
 run-create
@@ -74,21 +86,46 @@ check --ack <delivery_id> --wait
 
 A coordinator `check` replays the same oldest Delivery until its `delivery_id` is
 acknowledged. Process every message and decide each settled terminal's next owner before
-acknowledging. A wait timeout or `{count:0}` is a liveness checkpoint, not a Worker
-failure; keep waiting while the Dispatch is healthy.
+acknowledging. A wait timeout or `{count:0}` is a liveness checkpoint, not an Execution
+Lead or Worker failure; keep waiting while the Dispatch is healthy.
 
-Create independent tasks before starting parallel Workers. Prefer DeepSeek for well-scoped
-implementation, search and testing when a configured DeepSeek launcher is available. Agent
-IDs are installation-specific; inspect the runtime rather than guessing an ID.
+The Root sends the Execution Packet once by default, then supervises with long
+`check --wait` windows. Frequent status polling, terminal reading or step-by-step
+direction is the **Root micromanagement** anti-pattern. The Root never takes over the
+implementation edit/verify/fix loop; the Execution Lead keeps iterative fixes inside its
+dispatch and reports compressed evidence rather than transcripts or reasoning dumps.
 
-Use a fresh Claude agent for architecture consultation, difficult diagnosis, ambiguity
-resolution and independent HIGH-risk review. A Reviewer gets the original task, acceptance
-criteria, relevant diff or commit, test/check results and necessary docs, but not the
-implementer's private reasoning.
+The Execution Lead owns implementation planning, repository investigation, coding,
+debugging, tests/verification, iterative fixes and the delegation decision. It may solve
+directly, use provider-internal subagents, or create and settle Orca sub-dispatches.
+Prefer DeepSeek for well-scoped implementation, search, test generation and mechanical
+refactoring when a configured launcher is available. An Execution Worker has no delegation
+authority and routes routine questions to the Lead, not the Root. Agent IDs are
+installation-specific; inspect the runtime rather than guessing an ID.
 
-A valid supervised Worker or Reviewer must settle its dispatch with exactly one
-`worker_done`. After accepting completion, the Root either reuses the exact worker for an
-immediate follow-up or releases it through Orchestration.
+The Execution Lead re-engages the Root only when:
+
+1. architecture materially changes
+2. acceptance criteria are ambiguous
+3. difficult diagnosis remains unresolved
+4. HIGH-risk independent review is required
+5. deterministic verification cannot resolve uncertainty
+
+This is a closed list. Each escalation is one specific question followed by one specific
+decision; routine implementation choices, failing tests, refactors, tooling problems and
+local design remain with the Lead.
+
+Independent review uses a fresh session in its own worktree or terminal with no Root
+context or history. Give the Reviewer the original task, acceptance criteria, relevant
+diff or commit, verification evidence, necessary docs and risk level, but not the Root's
+private reasoning/transcript, Execution Packet rationale or Root-authored defense. A Root
+session never reviews its own work. Same-provider review retains correlated-blind-spot
+risk; for a HIGH-risk Claude-authored Root architecture design, prefer or add Codex and
+record the residual risk.
+
+A valid supervised Execution Lead, Worker or Reviewer settles its dispatch with exactly
+one `worker_done`. After accepting completion, its coordinator either reuses the exact
+agent for an immediate follow-up or releases it through Orchestration.
 
 Use ordinary Orca worktree/terminal prompt delivery only for a genuine ownership handoff
 where the original Root will stop monitoring. Do not mix that flow with tracked dispatch
@@ -124,15 +161,23 @@ still requires its own workload decision and is never the automatic fallback.
 
 ## 7. Verify and Complete
 
-The Root:
+The Execution Lead:
 
 1. runs required tests and evals
 2. records exact commands and results
-3. obtains required independent review
-4. resolves blocking findings
-5. commits meaningful changes
-6. updates the GitHub Issue/Kanban and durable documentation
-7. reports remaining uncertainty
+3. iterates through failures and creates a reviewable meaningful commit
+4. invokes the closed HIGH-risk-review re-entry condition when applicable
+5. resolves returned findings, re-verifies and creates the final meaningful commit
+6. returns compressed evidence: files, commands, results, findings and uncertainty
+
+The Root:
+
+1. handles only closed-list escalations
+2. obtains required fresh-session independent review of the reviewable commit
+3. provides bounded review decisions/findings while the Lead retains its active
+   implementation loop
+4. confirms acceptance and unresolved uncertainty
+5. updates the GitHub Issue/Kanban and durable documentation
 
 Do not claim a test passed unless it was executed. Do not merge or push unless the task
 explicitly authorizes it.

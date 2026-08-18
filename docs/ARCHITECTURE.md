@@ -12,14 +12,16 @@
 
 本文档定义一个长期可维护、可迁移、可扩展的多 Agent 开发系统。系统不是固定的
 “Architect → Coder → Reviewer”流水线，而是让一个 Root Agent 对任务 outcome
-负责，并根据风险、能力、成本和证据动态组织 Worker、Reviewer 与 specialist。
+负责、定义 bounded work，再由 first-class Execution Lead 根据风险、能力、成本和
+证据动态组织 execution、Worker 与 provider-internal subagents。
 
 系统必须保持以下不变量：
 
 - GitHub 是 durable system of record；
 - Orca 是默认的 ADE、执行、隔离、协作和编排平面；
 - 一个 task outcome 只有一个 Root owner；
-- Root / Worker / Reviewer 是动态角色，不与 provider 永久绑定；
+- Execution Lead 只获得 bounded execution authority，不接管 outcome ownership；
+- Root / Execution Lead / Worker / Reviewer 是动态角色，不与 provider 永久绑定；
 - 风险继续分为 LOW / MEDIUM / HIGH；
 - HIGH 风险必须进行独立 Review；
 - tests / evals 是首要验证机制；
@@ -38,43 +40,42 @@
 ## 2. 总体架构
 
 ```text
-                              USER
-                               │
-              Goals / Constraints / Acceptance / Gates
-                               │
-                 ┌─────────────┴─────────────┐
-                 │                           │
-          Product Kanban               Platform Kanban
-                 │                           │
-                 └──────────────┬────────────┘
-                                │
-                       GitHub System of Record
-             Issues / PRs / Git / CI / Docs / Policies
-                                │
-                     Thin Python Controller
-       polling / risk+budget / node policy / verify / metrics
-                   human gates / backup+recovery
-                                │
-                    delegates runtime effects to
-                                │
-                              Orca
-     ADE / worktrees / terminals / local+SSH / collaboration
-                  orchestration / completion tracking
-                                │
-          ┌─────────────────────┼─────────────────────┐
-          │                     │                     │
-     Local Node          Connected/SSH Node      Future Nodes
-   Orca worktrees          Orca worktrees       Orca worktrees
-          │                     │                     │
-   Codex / DeepSeek       Claude / Codex         other providers
-       / Claude              / DeepSeek
-          └─────────────────────┼─────────────────────┘
-                                │
-                       Tests / Evals / CI
-                                │
-                       Commits / PR / Issue
-                                │
-                         GitHub durable state
+                                  Human
+                   goals / authorization / human gates
+                                    │
+                                    ▼
+                 Root / Cognitive Control Plane
+                     preferred provider: Claude
+ requirements / goal / architecture / acceptance / risk / constraints
+ reconnaissance strategy / Execution Packet / ambiguity / escalation
+                         final outcome accountability
+                                    │
+                     one bounded Execution Packet
+                                    ▼
+              Execution Lead / Engineering Control Plane
+                      preferred provider: Codex
+ implementation plan / repository investigation / code / debug
+         tests / verify / iterative fixes / delegation decision
+                     │                         │
+                     │                         ├── provider-internal subagents
+                     ▼
+            Execution Worker
+       preferred provider: DeepSeek
+ bounded implementation / search / tests / mechanical refactor
+
+ Independent Reviewer: fresh context-isolated session/worktree
+ preferred Claude, then Codex; Claude-authored Root design prefers Codex
+
+ Runtime and durable planes:
+ GitHub System of Record ← commits / PRs / issues / policies / evidence
+          │
+ Thin Python Controller: polling / risk+budget / node / metrics / gates
+          │ delegates deterministic runtime effects
+          ▼
+ Orca: ADE / worktrees / terminals / local+SSH / collaboration /
+       orchestration / completion tracking
+          │
+ Local Node / Connected Node / Future Nodes → Tests / Evals / CI
 
  Optional side path:
  Herdr → only an explicitly approved detached/persistent terminal workload
@@ -87,6 +88,12 @@ terminal、message 或 dispatch lifecycle。
 V0 manual workflow 不依赖尚未实现的 Controller：human 可以从 GitHub task packet
 直接进入 Orca。Controller 出现后仍是 policy / external-state path，而不是所有交互
 必须经过的 runtime gateway。
+
+Root 与 Execution Lead 的关系是 supervised Orca Dispatch，不是 full handoff。一个
+Root 仍拥有一个 outcome；Execution Lead 只在 Execution Packet 边界内拥有 delegated
+execution authority。Execution Lead 不是普通 Worker，因为它可以自行分解、使用
+provider-internal subagents 或 dispatch Execution Worker，而 Worker 没有 delegation
+authority。
 
 ---
 
@@ -172,9 +179,10 @@ Orca Orchestration 提供：
 - supervised Worker 启动、等待、重用、retain 和 release；
 - completion tracking。
 
-当 Root 需要等待、整合和解决 Reviewer/Worker 结果时，使用 supervised
-Orchestration。真正的 full handoff 表示 ownership 已转移，原 Root 不再监控，不应伪装
-成 tracked dispatch。
+当 Root 需要等待并整合 Execution Lead / Reviewer 结果时，使用 supervised
+Orchestration；Execution Lead 对自己 dispatch 的 Worker 使用同样的 tracked lifecycle。
+真正的 full handoff 表示 ownership 已转移，原 Root 不再监控，不应伪装成 tracked
+dispatch。
 
 #### Local and SSH / connected-environment execution
 
@@ -215,8 +223,8 @@ Orca 不替代：
 - backup-retention policy；
 - production deployment gate。
 
-Orca 记录“发生了什么 runtime effect”；Root、Reviewer、tests 和 policy 决定“结果
-是否正确并可接受”。
+Orca 记录“发生了什么 runtime effect”；Root、Execution Lead、Reviewer、tests 和
+policy 决定“结果是否正确并可接受”。
 
 ### 3.5 Thin Python Controller
 
@@ -293,37 +301,63 @@ Controller or human intake
 risk / budget / node / human gates
         │
         ▼
-Orca-managed Root worktree + Root terminal
-(default preference: Codex)
+Root / Cognitive Control Plane
+(preferred provider: Claude)
+bounded reconnaissance + architecture + acceptance
         │
         ▼
-Root investigates and decides dynamically
- self-do / DeepSeek Worker / Claude specialist / parallel tasks
+one Execution Packet through supervised Orca Dispatch
+        │
+        ▼
+Execution Lead / Engineering Control Plane
+(preferred provider: Codex)
+investigate / plan / code / debug / delegate / verify / fix
+        │
+        ├── optional DeepSeek Execution Worker
         │
         ▼
 tests + evals + deterministic checks
         │
-        ├── HIGH or unresolved risk ──► independent Claude review preferred
+        ▼
+reviewable meaningful commit
+        │
+        ├── closed Root re-entry only when one of five conditions applies
+        ├── HIGH review ──► fresh context-independent Reviewer
         │
         ▼
-Root resolves blocking findings
+Execution Lead resolves findings / re-verifies / final commit
         │
         ▼
-meaningful commit + GitHub Issue/Kanban/PR state
+Execution Lead returns compressed evidence
+        │
+        ▼
+Root accepts outcome / resolves bounded escalation
+        │
+        ▼
+GitHub Issue/Kanban/PR durable state
 ```
 
 步骤：
 
 1. Issue 提供 goal、acceptance、constraints、risk 和 references。
 2. Controller 或人工验证 task 可开始，应用 policy 并选择 node。
-3. Orca 创建/选择独立 worktree，启动 Root。
-4. Root pull 最小必要 context，决定是否 delegation、parallel 或 escalation。
-5. Root 通过 Orca Orchestration 管理 supervised Worker / Reviewer。
-6. Root 实际执行 required tests / evals。
-7. HIGH task 必须完成独立 Review；其他 task 按风险和不确定性触发。
-8. Root 解决 blocking findings，再次验证。
-9. meaningful changes commit。
-10. GitHub 同步 task state、verification 和 remaining uncertainty。
+3. Orca 创建/选择独立 Root workspace；Root 只读取足以正确界定任务的 context。
+4. Root 明确 architecture、acceptance、constraints、risk 与 reconnaissance strategy，
+   创建默认唯一的 Execution Packet。
+5. Root 通过 supervised Orca Dispatch 把 bounded execution authority 交给 Execution
+   Lead，但继续拥有 outcome。
+6. Execution Lead 自主 investigate、plan、implement、debug，并决定 self-do、使用
+   provider-internal subagents 或 dispatch Execution Worker。
+7. Execution Lead 在同一 dispatch 内运行 required tests / evals、修复失败并迭代到
+   acceptance，然后创建 Reviewer 可见的 meaningful commit；routine choice 不返回
+   Root。
+8. 只有 closed Root re-entry list 中的条件才进行 bounded exchange。HIGH task 必须
+   使用 fresh context-independent session 完成 Review。
+9. Execution Lead 解决 implementation 与 blocking findings，再次验证并创建 final
+   meaningful commit，然后返回 files、commands、results、findings 和 uncertainty 的
+   compressed evidence。
+10. Root 对最终 outcome 负责，并同步 GitHub task state、verification 和 remaining
+    uncertainty。
 
 除非任务明确授权，不自动 push、merge 或部署到 production。
 
@@ -367,11 +401,11 @@ Lineage 不是 Git base。创建前同时决定：
 
 独立 worktree 无法自动看到另一个 worktree 的 uncommitted edits。第一版流程要求：
 
-1. 实现完成并通过本地检查；
-2. commit first version；
+1. Execution Lead 完成实现并通过本地检查；
+2. Execution Lead commit first version；
 3. reviewer worktree 以该 commit / feature branch 为 base；
 4. Review packet 同时给出 base-to-head diff command 或 commit；
-5. blocking fix 在 Root worktree 完成并再次 commit；
+5. blocking fix 在 Execution Lead worktree 完成并再次 commit；
 6. 必要时启动 follow-up review。
 
 这同时满足 reviewer isolation 和 Git durable context。
@@ -382,21 +416,59 @@ Lineage 不是 Git base。创建前同时决定：
 
 ### 6.1 Root
 
-每个 outcome 只有一个 Root。Root：
+每个 outcome 只有一个 Root。Root 是 Cognitive Control Plane，默认 provider 偏好为
+Claude，但不是永久绑定。Root 负责：
 
-- 理解 goal、constraints、acceptance、risk；
-- pull repository context；
-- 选择 provider、delegation 和 worktree topology；
-- 通过 Orca 管理 supervised work；
-- 整合结果；
-- 运行 verification；
-- 解决 Review findings；
-- commit meaningful changes；
-- 同步 GitHub durable state；
-- 对最终 outcome 负责。
+- requirement clarification；
+- goal definition；
+- reconnaissance strategy；
+- architecture planning；
+- acceptance criteria；
+- constraints / non-goals；
+- risk classification；
+- Execution Packet creation；
+- ambiguity resolution 和 escalation handling；
+- final outcome accountability。
 
-### 6.2 Worker
+Root reconnaissance 只读取足以正确界定工作的 context，并通过一个 bounded Execution
+Packet 把 execution authority 交给 Execution Lead。Root 不执行 implementation
+edit/verify/fix loop，不决定 routine local detail，也不对 Execution Lead step-by-step
+指导。频繁 status polling、terminal reading 和逐步指挥属于 **Root micromanagement**
+anti-pattern。
 
+### 6.2 Execution Lead
+
+Execution Lead 是 first-class Engineering Control Plane，默认 provider 偏好为 Codex，
+但不是永久绑定。Root 保留 outcome ownership；Execution Lead 在 supervised Orca
+Dispatch 和 Execution Packet 边界内获得 delegated execution authority。
+
+Execution Lead 负责：
+
+- implementation planning；
+- repository investigation；
+- coding 和 debugging；
+- tests、evals 和 verification；
+- iterative fixes；
+- 判断 self-do、使用 provider-internal subagents 或 dispatch Execution Worker；
+- settle 自己创建的 Worker sub-dispatch；
+- 形成 compressed evidence 和 meaningful commit。
+
+Delegation authority 是 Execution Lead 与普通 Worker 的区别。Execution Lead 自主运行到
+acceptance criteria 满足，只能在以下五种情况 re-engage Root：
+
+1. architecture materially changes
+2. acceptance criteria are ambiguous
+3. difficult diagnosis remains unresolved
+4. HIGH-risk independent review is required
+5. deterministic verification cannot resolve uncertainty
+
+这是 closed Root re-entry list。Routine implementation choice、test failure、refactor、
+tooling problem 和 local design detail 都由 Execution Lead 解决。Escalation 是一个
+specific question 与一个 specific decision，不把 implementation loop 转回 Root。
+
+### 6.3 Worker
+
+Execution Worker 通常由 Execution Lead dispatch，默认 provider 偏好为 DeepSeek。
 Worker 完成明确定义的 scope：
 
 - implementation；
@@ -405,12 +477,15 @@ Worker 完成明确定义的 scope：
 - repetitive execution；
 - bounded diagnosis。
 
-Worker 不擅自扩大 architecture，返回 files、commands、results、failures 和
-uncertainty。Supervised Worker 按 injected lifecycle 发送一次 `worker_done`。
+Worker 没有 delegation authority，不创建 subagent、不 dispatch 其他 Worker，也不绕过
+Execution Lead 指挥 Root。Worker 不擅自扩大 architecture，返回 files、commands、
+results、failures 和 uncertainty。Supervised Worker 按 injected lifecycle 发送一次
+`worker_done`。
 
-### 6.3 Reviewer
+### 6.4 Reviewer
 
-Reviewer 独立对照：
+Reviewer independence 指 fresh-session context independence。Reviewer 必须在自己的
+worktree / terminal 中使用没有 Root context 或 history 的新 session，独立对照：
 
 - original goal；
 - acceptance criteria；
@@ -423,7 +498,13 @@ Reviewer 优先检查 correctness、regression、edge case、security、data int
 financial logic、look-ahead risk 和 missing verification，并区分 blocking /
 non-blocking。
 
-### 6.4 Platform Steward
+Reviewer 不接收 Root private reasoning / transcript、Execution Packet rationale 或
+Root 对自身设计的辩护。Root session 不能 review 自己的 work，携带 Root context 的
+session 也不算 independent。同 provider fresh session 可减少 anchoring，但仍有
+correlated blind spots；当 HIGH-risk artifact 是 Root 自己的 architecture design 时，
+优先或增加 cross-provider Reviewer，并记录 residual correlation risk。
+
+### 6.5 Platform Steward
 
 Platform Steward 管系统改进而不是单个 product outcome：
 
@@ -437,23 +518,25 @@ Platform Steward 管系统改进而不是单个 product outcome：
 
 Platform Steward 不成为每个 Root 的审批层，也不能自行放宽 human gates。
 
-### 6.5 不使用固定组织图
+### 6.6 不使用固定组织图
 
 推荐：
 
 ```text
-                       Root
-                         │
-             evidence-based decision
-          ┌──────────────┼──────────────┐
-          │              │              │
-       self-do       low-cost work   premium specialist
-                         │              │
-                     DeepSeek         Claude
-          │              │              │
-          └──────── tests/evals ────────┘
-                         │
-                risk-based independent review
+             Root / Cognitive Control Plane
+                    (Claude preferred)
+                          │
+                   Execution Packet
+                          │
+             Execution Lead / Engineering
+                     (Codex preferred)
+                ┌─────────┼─────────┐
+                │         │         │
+            self-do   subagents   Worker
+                                  (DeepSeek preferred)
+                └──── tests / evals / fixes ────┘
+                          │
+              fresh context-independent review
 ```
 
 Provider preference 可以被 availability、capability、budget、independence 或 task
@@ -471,12 +554,11 @@ evidence 覆盖。
 
 | Work | Preferred provider | Notes |
 |---|---|---|
-| Root ownership | Codex | 默认 Root；不是永久绑定 |
-| Well-scoped implementation/search/testing | DeepSeek | preferred low-cost Worker |
-| Architecture consultation | Claude | premium specialist |
-| Difficult diagnosis | Claude | premium specialist |
-| Ambiguity/conflict resolution | Claude | premium specialist |
-| Independent HIGH-risk review | Claude | 与 implementer 保持独立 |
+| Root / Cognitive Control Plane | Claude | problem definition 与 judgment |
+| Execution Lead / Engineering Control Plane | Codex | autonomous engineering delivery |
+| Well-scoped implementation/search/test/mechanical refactor | DeepSeek | preferred Execution Worker |
+| Independent review | Claude, then Codex | fresh context-isolated session |
+| Cross-provider review of Claude-authored Root design | Codex | 降低 provider-level correlation |
 | Fallback | any capable provider | 由 capability/availability/budget/evidence 决定 |
 
 路由顺序写入 `.agent/policies/routing.yaml`，风险触发写入
@@ -484,6 +566,21 @@ evidence 覆盖。
 是否 required 具有 authority；`routing.yaml` 只在 requirement 已知后选择 provider，
 risk-level role key 覆盖同名 default，缺省时继承 default。Controller 记录近似
 provider pressure，不依赖不稳定的精确额度 API。
+
+正常运行必须让 Codex execution usage 显著高于 Claude Root usage。这不是 aspiration，
+而由以下 structural rules 强制：
+
+1. Root reconnaissance 有界，只读取正确制定 Execution Packet 所需内容；为了写 packet
+   而阅读整个 codebase 是 anti-pattern。
+2. Root 不运行 implementation edit/verify/fix loop；该 loop 完全属于 Execution Lead。
+3. 每个 task 默认只有一个 Execution Packet；iterative fixes 留在同一个 Execution Lead
+   dispatch 内，不反复返回 Root。
+4. Execution Lead 只报告 compressed evidence：files changed、commands、results、
+   findings 和 uncertainty；不提交 full transcript 或 full reasoning dump。
+5. Root 使用 long `check --wait` windows 监督。Frequent status polling、terminal
+   reading 或 step-by-step direction 是 **Root micromanagement** anti-pattern。
+6. Escalation 是 bounded exchange：specific question 与 specific decision；不能把
+   implementation loop 转回 Root。
 
 至少记录：
 
@@ -493,7 +590,8 @@ provider pressure，不依赖不稳定的精确额度 API。
 - approximate context / complexity；
 - quota / rate-limit failure；
 - review yield；
-- verification outcome。
+- verification outcome；
+- root_vs_execution_usage_share。
 
 ---
 
@@ -528,10 +626,22 @@ uncertainty、blast radius 和 test quality 触发。
 HIGH 必须：
 
 1. required tests / evals 实际执行；
-2. independent reviewer 与 implementer 保持认知隔离；
+2. independent Reviewer 使用 fresh session 和独立 worktree / terminal，与 Root 和
+   implementer 保持 context isolation；
 3. blocking findings 解决；
 4. remaining uncertainty 显式报告；
 5. 必要 human gate 保持。
+
+Review packet 只能提供 original task、acceptance criteria、diff / commit、
+verification evidence、relevant docs 和 risk level。不得提供 Root private reasoning、
+Root transcript、Execution Packet rationale 或 Root 对自身 design 的辩护。A Root
+session cannot review itself；任何携带 Root context 的 session 都不满足
+independence。
+
+同 provider 的 fresh session 可以减少 anchoring，但不能消除 model-level correlated
+blind spots。当 HIGH-risk artifact 本身是 Root authored architecture design 时，优先
+使用或增加 cross-provider independent Reviewer（Claude Root 时优先 Codex），并在
+task report 中记录 residual correlation risk。
 
 本任务改变 Controller safety boundary，因此即使主要是 docs/config，也采用独立
 architecture review。
@@ -594,25 +704,31 @@ tests/evals；deterministic policy 进入 Controller/config。
 
 ## 10. Task and Review Packets
 
-Root task packet 至少包含：
+Execution Packet 是 Root 的 primary work product，也是 Root → Execution Lead 的 sole
+normal interface。每个 task 默认创建一次，至少包含：
 
 ```text
-TASK / ISSUE
-ROLE
-RISK
 GOAL
-ACCEPTANCE
+BACKGROUND / PROBLEM STATEMENT
+ACCEPTANCE CRITERIA
 CONSTRAINTS / NON-GOALS
-WORKTREE
-BASE COMMIT
-RELEVANT DOCS
+RISK: LOW | MEDIUM | HIGH
+ARCHITECTURE DECISIONS
+OPEN QUESTIONS DELEGATED
+RECONNAISSANCE STRATEGY
 REQUIRED TESTS / EVALS
-CURRENT CI
-PREVIOUS ATTEMPTS
+VERIFICATION EVIDENCE REQUIRED
+WORKTREE / BASE COMMIT
 BUDGET / HUMAN GATES
+ESCALATION CONTRACT
+EXPECTED REPORT FORMAT
 ```
 
-Agent-to-Agent assignment 至少包含：
+Architecture decisions 已由 Root 决定，Execution Lead 不自动 reopen。Open questions
+delegated 明确哪些判断由 Lead 自主作出；reconnaissance strategy 说明从哪里开始查，
+而不是由 Root 代替 Lead 读取整个 repository。
+
+Execution Lead → Execution Worker assignment 至少包含：
 
 ```text
 GOAL
@@ -633,7 +749,9 @@ Independent Reviewer 额外获得：
 - risk level；
 - relevant architecture / policy docs。
 
-默认不提供 implementer 私有 reasoning 或长篇辩护，减少 anchoring。
+Reviewer 必须是 fresh context-independent session。默认不提供 implementer 私有
+reasoning、Root private reasoning / transcript、Execution Packet rationale 或 Root 对
+自身 design 的长篇辩护，减少 anchoring。
 
 ---
 
@@ -644,17 +762,20 @@ Independent Reviewer 额外获得：
 常见 coordinator lifecycle：
 
 ```text
-Run
+Root Run
  └── Task
-      └── Dispatch
-           └── Worker terminal
-                ├── question / escalation
-                └── worker_done
+      └── supervised Dispatch
+           └── Execution Lead terminal
+                ├── optional Lead-owned Worker sub-dispatch
+                ├── closed-list question / escalation
+                └── worker_done with compressed evidence
 ```
 
 Root 先 create/bind Run，再 create Task，之后使用 version-matched
-`worker-start` 或低层 dispatch。等待期间使用 structured `check --wait`，不是固定
-sleep/poll loop。
+`worker-start` 或低层 dispatch 把 Execution Packet 交给 Execution Lead。等待期间使用
+long structured `check --wait` windows，不做固定 sleep/poll loop、频繁 terminal read
+或 step-by-step direction。Execution Lead 如果 dispatch Execution Worker，必须拥有并
+settle 该 sub-dispatch，不把 routine Worker coordination 交回 Root。
 
 `check` 返回 oldest FIFO Delivery，并持续 replay 同一 batch，直到 coordinator 使用
 `check --ack <delivery_id>`。Root 必须先处理 Delivery 内每条 message；对每个有效
@@ -667,6 +788,12 @@ sleep/poll loop。
 完成整个 batch 后才 ack，再继续 wait。wait timeout 或 `{count:0}` 只是 liveness
 checkpoint，不是 Worker failure。不能因为 timeout、TUI idle、status 或 heartbeat
 就关闭 active Worker。
+
+Execution Lead 在 acceptance 满足或 definitive blocker 前保持 edit/verify/fix loop，
+并按 active preamble 只发送一次 `worker_done`。Root 收到的是 compressed evidence，
+不是 transcript 或 reasoning dump。HIGH-risk review required 是 closed re-entry
+condition：Root 提供 bounded review decision / findings 后，implementation fix loop 仍由
+Execution Lead 完成。
 
 ### 11.2 Full handoff
 
@@ -844,12 +971,18 @@ Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth
 - review yield；
 - mean task latency；
 - provider pressure；
+- root_vs_execution_usage_share；
 - CI / eval failure；
 - blocked age；
 - node utilization；
 - Orca worktree/launch/dispatch failure classes；
 - human-gate wait；
 - backup/recovery checks。
+
+`root_vs_execution_usage_share` 由 Platform Steward 用来发现 Root-heavy drift。正常
+pattern 应让 Codex execution usage 显著高于 Claude Root usage；持续反向变化应触发对
+packet scope、Root reconnaissance、polling frequency 和 implementation-loop ownership
+的检查。
 
 反复 failure 应优先晋升为：
 
@@ -914,12 +1047,13 @@ git clone
 
 ```text
 Issue
-→ Orca worktree
-→ Codex Root
-→ optional DeepSeek Worker / Claude specialist
-→ tests/evals
-→ required Claude independent review
-→ commit + GitHub state
+→ Orca-managed Claude Root / Cognitive Control Plane
+→ one bounded Execution Packet
+→ supervised Codex Execution Lead / Engineering Control Plane
+→ optional Lead-owned DeepSeek Execution Worker
+→ Execution Lead tests/evals/fix loop
+→ required fresh context-independent review
+→ compressed evidence + commit + Root-owned GitHub state
 ```
 
 验证真实的 worktree、setup、Agent launch、Orchestration、review、remote 和 recovery
@@ -932,7 +1066,7 @@ Issue
 - GitHub polling / claim；
 - risk / budget / gate check；
 - node choice；
-- request Orca Root launch；
+- request Orca Root and supervised Execution Lead launch；
 - deterministic verify；
 - GitHub state sync；
 - metrics。
@@ -1037,11 +1171,16 @@ ORCA status --json
 Repository references：
 
 - `AGENTS.md`；
-- `.agent/roles/`；
+- `.agent/roles/root.md`；
+- `.agent/roles/execution-lead.md`；
+- `.agent/roles/worker.md`；
+- `.agent/roles/reviewer.md`；
+- `.agent/roles/platform-steward.md`；
 - `.agent/providers/`；
 - `.agent/policies/routing.yaml`；
 - `.agent/policies/risk.yaml`；
 - `docs/decisions/ADR-001-orca-first-execution-plane.md`；
+- `docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md`；
 - `docs/runbooks/ORCA_WORKFLOW.md`；
 - `tests/test_architecture_policy.py`。
 

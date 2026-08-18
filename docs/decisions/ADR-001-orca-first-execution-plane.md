@@ -4,6 +4,11 @@
 - Date: 2026-08-18
 - Scope: Multi-agent development runtime and Controller boundary
 
+> Supersession note: ADR-002 supersedes only the provider-role preference section below.
+> That list is retained as a historical record, not current routing policy. ADR-001 remains
+> Accepted, and all Orca-first runtime, Controller-boundary and Herdr-optional decisions
+> remain in force.
+
 ## Context
 
 The initial architecture made Herdr the default execution and communication plane and gave

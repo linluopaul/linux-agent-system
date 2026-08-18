@@ -8,6 +8,8 @@ A portable, Orca-first multi-agent development system for Linux.
 - Orca — primary ADE, Git-worktree isolation layer, agent collaboration plane,
   terminal/launch interface, local or SSH execution layer, and orchestration mechanism
 - Codex / DeepSeek / Claude — replaceable providers with task-specific preferences
+- Root / Cognitive Control Plane — defines the problem, architecture, acceptance and risk
+- Execution Lead / Engineering Control Plane — autonomously delivers the bounded work
 - Python Controller — future thin policy and external-system coordination plane
 - Tests and evals — primary verification mechanism
 - Multiple Linux nodes — independent clones and worktrees synchronized through Git
@@ -18,13 +20,21 @@ A portable, Orca-first multi-agent development system for Linux.
 
 Provider roles remain replaceable rather than permanently bound:
 
-- Codex is the default Root.
-- DeepSeek is the preferred low-cost Worker for well-scoped implementation, search and
-  testing.
-- Claude is the premium specialist for architecture consultation, difficult diagnosis,
-  ambiguity resolution and independent HIGH-risk review.
+- Claude is preferred for Root / Cognitive Control Plane work.
+- Codex is preferred for the first-class Execution Lead / Engineering Control Plane role.
+- DeepSeek is the preferred low-cost Execution Worker for well-scoped implementation,
+  search, test generation and mechanical refactoring, normally dispatched by the
+  Execution Lead.
+- Independent review uses a fresh, context-isolated session; Claude is preferred, followed
+  by Codex. A Claude-authored HIGH-risk Root design should prefer or add Codex review.
 
 Capability, availability, risk and budget can override these preferences.
+
+The Root produces one bounded Execution Packet and supervises through Orca without running
+the edit/verify/fix loop. The Execution Lead owns that loop, chooses any Worker delegation,
+and returns compressed verification evidence; this structure keeps normal Codex execution
+usage substantially above Claude Root usage while one Root remains accountable for the
+outcome.
 
 ## Runtime Boundaries
 
@@ -50,6 +60,7 @@ See:
 
 - `docs/ARCHITECTURE.md` — system architecture
 - `docs/decisions/ADR-001-orca-first-execution-plane.md` — architecture decision
+- `docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md` — role-plane decision
 - `docs/runbooks/ORCA_WORKFLOW.md` — current operational workflow
 
 ## Repository Structure
@@ -57,7 +68,7 @@ See:
 - `AGENTS.md` — universal agent rules
 - `CLAUDE.md` — Claude Code adapter
 - `.agent/providers/` — provider-specific guidance
-- `.agent/roles/` — Root, Worker, Reviewer and Platform Steward roles
+- `.agent/roles/` — Root, Execution Lead, Worker, Reviewer and Platform Steward roles
 - `.agent/policies/` — routing, risk and retry policies
 - `docs/` — architecture, decisions and runbooks
 - `controller/` — future thin Python Controller

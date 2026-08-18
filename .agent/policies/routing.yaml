@@ -8,9 +8,13 @@
 
 defaults:
   preferred_root:
-    - codex
     - claude
+    - codex
     - deepseek
+  preferred_execution_lead:
+    - codex
+    - deepseek
+    - claude
   preferred_worker:
     - deepseek
     - codex
@@ -35,10 +39,16 @@ work_preferences:
   independent_high_risk_review:
     - claude
     - codex
+  cross_provider_review_of_claude_root_design:
+    - codex
 
 risk:
   low:
     preferred_root:
+      - claude
+      - codex
+      - deepseek
+    preferred_execution_lead:
       - codex
       - deepseek
       - claude
@@ -50,9 +60,13 @@ risk:
 
   medium:
     preferred_root:
-      - codex
       - claude
+      - codex
       - deepseek
+    preferred_execution_lead:
+      - codex
+      - deepseek
+      - claude
     preferred_worker:
       - deepseek
       - codex
@@ -67,6 +81,10 @@ risk:
 
   high:
     preferred_root:
+      - claude
+      - codex
+      - deepseek
+    preferred_execution_lead:
       - codex
       - claude
       - deepseek
@@ -85,9 +103,12 @@ risk:
 principles:
   - use_cheapest_capable_resource
   - prefer_deterministic_tools_before_model_calls
-  - codex_is_default_root_preference
+  - claude_is_default_root_preference
+  - codex_is_default_execution_lead_preference
   - deepseek_is_preferred_for_well_scoped_worker_tasks
-  - claude_is_preferred_for_premium_specialist_work
+  - root_reentry_is_limited_to_the_closed_escalation_list
+  - normal_codex_execution_usage_substantially_exceeds_claude_root_usage
+  - root_does_not_run_the_implementation_edit_verify_fix_loop
   - preserve_premium_capacity_for_high_value_reasoning
   - allow_provider_fallback
   - do_not_permanently_bind_provider_to_role
