@@ -691,7 +691,7 @@ Platform Steward 不成为每个 Root 的审批层，也不能自行放宽 human
 
 ```text
              Root / Cognitive Control Plane
-                 (pi harness / capable pool)
+            (Claude Code harness / capable pool)
                           │
                    Execution Packet（EXECUTION HARNESS）
                           │

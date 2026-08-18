@@ -283,6 +283,233 @@ def live_architecture_documents() -> list[Path]:
     return paths
 
 
+# ---------------------------------------------------------------------------
+# v2.1: deterministic role -> harness cross-check against routing.yaml.
+#
+# Purpose. This closes a specific defect CLASS. Three of the last four BLOCKING
+# findings (ARCHITECTURE.md:566, :738, :694) were the same defect: a live document
+# asserting a role -> harness mapping that contradicted .agent/policies/routing.yaml
+# `defaults.preferred_harness`. Each was fixed one-off, and each time the next one
+# survived because nothing asserted the invariant. This cross-check does.
+#
+# Policy is the single source of truth. The blessed role->harness mapping and the
+# recognised harness spellings are both READ from routing.yaml (via the test), never
+# hardcoded in these helpers or in the assertions. A future policy edit therefore
+# cannot silently desync the prose: whatever routing.yaml now prefers is what a live
+# claim must still agree with.
+#
+# RECOGNISABLE-FORM CONSTRAINT (stated explicitly, not hidden): to associate a live
+# claim with a role deterministically while avoiding false positives, a role->harness
+# claim is checked ONLY when it is expressed in one of the four shapes the four past
+# defects actually hid in, and only when it names the harness in a recognised spelling:
+#   * markdown table cell      (the §7 form   ) - a role cell + a "<H> harness" cell
+#   * fenced diagram block     (the §6.6 form ) - a role label line + a harness
+#     annotation line in the same code fence (nearest preceding role label)
+#   * bilingual prose sentence (the §6.1 form ) - one role noun and a "<H> harness"
+#     mention on the same line with no competing role noun
+#   * any other structured    (the sweep form) - a bullet/numbered list item carrying
+#     a role noun and a "<H> harness" mention gets the same same-line treatment as
+#     prose, so a future list-embedded claim is covered too.
+# A claim too free-form to pin to a single role (e.g. ORCA_WORKFLOW prose naming both
+# Root and Execution Lead on one line, or a bare "Root harness" with no spelling) is
+# deliberately NOT silently swept up: it is excluded by the recognisable form and this
+# is declared here rather than glossed over. The accepted residual prose evasions
+# (R1-R4 and the reviewer's other documented cases) remain out of scope.
+# ---------------------------------------------------------------------------
+
+# Role key -> recognisable role noun spellings used to locate role->harness claims.
+# These tokens are structural labels from the architecture/theory of roles, not new
+# policy; the BLESSED mapping (which harness a role may use) always comes from YAML.
+ROLE_CLAIM_TOKENS = {
+    "root": ["root", "cognitive control plane"],
+    "execution_lead": ["execution lead", "engineering control plane"],
+    "specialist": ["specialist"],
+    "reviewer": ["independent review", "high-risk review", "reviewer"],
+    "platform_steward": ["platform steward"],
+    "worker": ["execution worker", "worker"],
+}
+
+
+def _harness_spelling_map(harness_keys: list[str]) -> dict[str, str]:
+    """Map every textual spelling of a policy harness key back to that key.
+
+    Policy stores harness keys as snake_case (claude_code, codex_cli, pi) which prose
+    and diagrams render as "Claude Code harness", "claude-code harness", "codex-cli
+    harness" etc. All three forms (snake_case, hyphenated, spaced) are recognised so a
+    future editor who writes the hyphenated or spaced form -- not just the exact
+    policy key -- is checked, never false-positived. Values are derived from the YAML
+    keys; assertions never hardcode a harness name.
+    """
+    spelling_to_key: dict[str, str] = {}
+    for key in harness_keys:
+        lower = key.lower()
+        for spelling in (lower, lower.replace("_", "-"), lower.replace("_", " ")):
+            spelling_to_key[spelling] = key
+    return spelling_to_key
+
+
+def _alternation(items: list[str]) -> str:
+    return "|".join(re.escape(i) for i in sorted(items, key=len, reverse=True))
+
+
+def _harness_claims(segment: str, spelling_to_key: dict[str, str]) -> list[tuple[str, str]]:
+    """Find "<H> harness" mentions in a fragment -> (policy_harness_key, snippet).
+
+    The trailing ``(?![A-Za-z0-9])`` boundary accepts a CJK parenthetical right after
+    the word "harness" (e.g. ``harness（capable pool）``) while still rejecting a plain
+    word that merely starts with the letters (e.g. "harnessed"). This matters because
+    the §6.1 prose claim wraps onto two physical lines and is re-joined by the prose
+    shape before this runs.
+    """
+    spellings = sorted(spelling_to_key, key=len, reverse=True)
+    pattern = re.compile(r"\b(" + _alternation(spellings) + r")\s+harness\b(?![A-Za-z0-9])", re.IGNORECASE)
+    return [
+        (spelling_to_key[m.group(1).lower()], m.group(0))
+        for m in pattern.finditer(segment)
+    ]
+
+
+def _role_key(line: str) -> str | None:
+    """The single role key a line's tokens resolve to, or None if none/ambiguous.
+
+    The trailing ``(?![-_])`` guard keeps command- and product-tokens from being read as
+    role nouns: "worker-start" / "worker-release" / "worker_done" and "root-owned" are
+    orchestration or prose tokens, NOT role->harness claim subjects. A genuine role label
+    ("Root /", "Execution Lead /", a table cell) is never immediately followed by a
+    hyphen or underscore, so this excludes only non-role matches.
+    """
+    found = {
+        role
+        for role, tokens in ROLE_CLAIM_TOKENS.items()
+        if re.search(
+            r"\b(?:%s)\b(?![-_])" % _alternation(tokens), line, re.IGNORECASE
+        )
+    }
+    return found.pop() if len(found) == 1 else None
+
+
+def _table_row_claims(line: str, spelling_to_key) -> list[tuple[str, str, str]]:
+    """A markdown table row -> (role_key, harness_key, snippet) for role+harness cells.
+
+    The role must be a cell that appears BEFORE the harness cell, so a Notes column
+    that happens to mention a different role noun (e.g. ``Root 决定``) cannot add a
+    competing role token to the same row.
+    """
+    cells = [c.strip() for c in line.split("|")[1:-1]]
+    harness_indices = [
+        i for i, cell in enumerate(cells) if _harness_claims(cell, spelling_to_key)
+    ]
+    if not harness_indices:
+        return []
+    role_cells = {
+        _role_key(cell)
+        for cell in cells[: harness_indices[0]]
+        if _role_key(cell)
+    }
+    if len(role_cells) != 1:
+        return []
+    role_key = next(iter(role_cells))
+    claims = []
+    for i, cell in enumerate(cells):
+        if i < harness_indices[0]:
+            continue
+        for harness_key, snippet in _harness_claims(cell, spelling_to_key):
+            claims.append((role_key, harness_key, snippet))
+    return claims
+
+
+def _fence_claims(block: str, spelling_to_key) -> list[tuple[str, str, str]]:
+    """A fenced diagram block -> role->harness claims via nearest preceding role label."""
+    claims = []
+    current_role = None
+    for line in block.splitlines():
+        harness = _harness_claims(line, spelling_to_key)
+        role = _role_key(line)
+        if harness:
+            owner = role if role is not None else current_role
+            if owner is not None:
+                for harness_key, snippet in harness:
+                    claims.append((owner, harness_key, snippet))
+        if role is not None:
+            current_role = role
+    return claims
+
+
+def _prose_units(text: str) -> list[str]:
+    """Running prose / structured list text -> sentence units for role->harness claims.
+
+    A role->harness prose claim can wrap across physical lines (the §6.1 sentence does:
+    ``默认偏好使用 Claude Code\nharness（capable pool）``), so it is re-joined before it
+    is split into sentences. Blank lines and the start of a bullet/numbered list item
+    bound a unit so two unrelated items are never fused into one pseudo-sentence.
+    """
+    units: list[str] = []
+    parts = re.split(r"\n\s*\n|\n[ \t]*(?:[-*+] |\d+\. )", text)
+    for part in parts:
+        collapsed = re.sub(r"\s+", " ", part).strip()
+        if not collapsed:
+            continue
+        for sentence in re.split(r"(?<=[。！？.!?])\s*", collapsed):
+            sentence = sentence.strip()
+            if sentence:
+                units.append(sentence)
+    return units
+
+
+def _prose_claims(sentence: str, spelling_to_key) -> list[tuple[str, str, str]]:
+    """Bilingual prose / structured list role->harness claims in one sentence.
+
+    A role noun followed (within a short gap) by an explicit binding operator and then
+    a recognised "<H> harness" phrase. The binding operator is what separates a real
+    role->harness assignment from mere co-occurrence, so a compound English sentence
+    that separately says "the default is the Pi Standard/Fast Lead (pi harness ...)"
+    and "the Root selects the Codex Premium Lead" does NOT associate Root with "pi
+    harness". Chinese §6.1 form (``默认偏好使用 <H> harness``) and English forms
+    (``prefers/default is/uses <H> harness`` / ``default ... for <H>``) are both
+    recognised, keeping the check bilingual like the live documents.
+    """
+    bind = (
+        r"(?:默认偏好(?:使用)?|默认provider偏好\s*为?|[ ]?provider偏好\s*为?|"
+        r"偏好\s*为|default\s+(?:is|s\s+to)|prefers?|uses?|绑定(?:为|到|于))"
+    )
+    harness_alt = _alternation(sorted(spelling_to_key, key=len, reverse=True))
+    claims: list[tuple[str, str, str]] = []
+    for role, tokens in ROLE_CLAIM_TOKENS.items():
+        role_alt = _alternation(tokens)
+        pattern = re.compile(
+            rf"\b(?:{role_alt})\b(?![-_])[^\n]{{0,60}}?{bind}"
+            rf"[^\n]{{0,20}}?(?:the\s+|an\s+|a\s+)?({harness_alt})\s+harness",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(sentence):
+            harness_key = spelling_to_key[match.group(1).lower()]
+            claims.append((role, harness_key, match.group(0)))
+    return claims
+
+
+def _role_harness_claims(path: Path, spelling_to_key) -> list[tuple[str, str, str, str]]:
+    """All recognisable (role_key, harness_key, shape, snippet) claims in one document."""
+    raw = strip_historical_escape_hatch(path.read_text(encoding="utf-8", errors="replace"))
+    claims: list[tuple[str, str, str, str]] = []
+    # Shape 2: markdown table rows live outside code fences.
+    for line in raw.splitlines():
+        if line.lstrip().startswith("|"):
+            for role_key, harness_key, snippet in _table_row_claims(line, spelling_to_key):
+                claims.append((role_key, harness_key, "md-table", snippet))
+    # Shape 3: fenced diagram blocks.
+    for block in fenced_code_blocks(raw):
+        for role_key, harness_key, snippet in _fence_claims(block, spelling_to_key):
+            claims.append((role_key, harness_key, "fence", snippet))
+    # Shapes 1 & 4: bilingual prose sentence and structured list item. Both are running
+    # text carrying a role noun plus a binding-operator role->harness assignment, so
+    # the same sentence-level, binding-gated sweep covers them.
+    non_fence = re.sub(r"```[^\n]*\n.*?```", "", raw, flags=re.DOTALL)
+    for sentence in _prose_units(non_fence):
+        for role_key, harness_key, snippet in _prose_claims(sentence, spelling_to_key):
+            claims.append((role_key, harness_key, "prose", snippet))
+    return claims
+
+
 WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
     "AGENTS.md",
     ".agent/roles/execution-lead.md",
@@ -1640,6 +1867,59 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn("closed", document, path)
             self.assertIn("condition 6", document, path)
             self.assertIn("re-entry", document, path)
+
+    def test_live_role_harness_claims_agree_with_policy(self) -> None:
+        """v2.1: every live role->harness statement agrees with routing.yaml.
+
+        routing.yaml is the single source of truth: the blessed role->harness mapping
+        and the recognised harness spellings are both read from the YAML, never
+        hardcoded. The test sweeps all four recognisable claim shapes (md table cell,
+        fenced diagram block, bilingual prose sentence, and any other structured list
+        item) across every live architecture document and asserts that each claim
+        names a harness policy actually allows for that role. A stale "pi harness for
+        Root", "pi harness for Root in the §7 table", or a stale pi-Root prose claim
+        each fails below. The recognised-harness-forms constraint the helpers enforce
+        (a claim is checked only when it appears in one of these shapes and names the
+        harness in a recognised spelling) is documented next to the helpers and is
+        intentionally strict to avoid false positives.
+        """
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        defaults = routing["defaults"]
+        preferred = defaults["preferred_harness"]
+        allowed = {role: [preferred[role]] for role in preferred}
+        premium = defaults.get("execution_lead", {}).get("premium_escalation_harness")
+        if premium and premium not in allowed["execution_lead"]:
+            allowed["execution_lead"].append(premium)
+        spelling_to_key = _harness_spelling_map(list(routing["harnesses"].keys()))
+
+        failures = []
+        discovered: list[str] = []
+        total = 0
+        for path in live_architecture_documents():
+            for role_key, harness_key, shape, snippet in _role_harness_claims(
+                path, spelling_to_key
+            ):
+                total += 1
+                discovered.append(
+                    f"{path.relative_to(ROOT)} [{shape}] {role_key} -> "
+                    f"{harness_key} :: {snippet!r}  "
+                    f"(policy allows {sorted(allowed.get(role_key, []))})"
+                )
+                if harness_key not in allowed.get(role_key, []):
+                    failures.append(
+                        f"{path.relative_to(ROOT)} [{shape}] role '{role_key}' claims "
+                        f"harness '{harness_key}' but routing.yaml defaults."
+                        f"preferred_harness allows {sorted(allowed.get(role_key, []))} "
+                        f":: {snippet!r}"
+                    )
+
+        # The sweep must have actually seen claims, or it cannot have closed the class.
+        self.assertGreater(total, 0, "cross-check swept no role->harness claims")
+        if failures:
+            self.fail(
+                "Live role->harness claim(s) contradict routing.yaml "
+                "defaults.preferred_harness:\n" + "\n".join(failures)
+            )
 
 
 if __name__ == "__main__":
