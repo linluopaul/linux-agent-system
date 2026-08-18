@@ -46,10 +46,10 @@ def fenced_code_blocks(document: str) -> list[str]:
 #     and is likewise absent.
 #   * The guard is a syntactic scan of the documented binding forms, NOT semantic proof.
 #     A provider name only triggers when it is bound to a role noun through an explicit
-#     structural operator (adjacency, "is"/"run by", "for", ":" , "=", "role:",
-#     "agent:", or the Chinese operators). Mere co-occurrence in a sentence - e.g.
-#     "Root prefers the Claude Code harness with a capable pool" - is a preference and
-#     is NOT flagged.
+#     structural operator (adjacency incl. a markdown table pipe `|`, "is"/"run by",
+#     "for", ":" , "=", "role:", "agent:", or the Chinese operators). Mere
+#     co-occurrence in a sentence - e.g. "Root prefers the Claude Code harness with a
+#     capable pool" - is a preference and is NOT flagged.
 #   * Genuinely historical / superseded-model narration is excluded ONLY when wrapped in
 #     the explicit escape hatch `<!-- HISTORICAL-BINDING-START --> ... <!--
 #     HISTORICAL-BINDING-END -->` (or a single-line `HISTORICAL-BINDING` comment). Every
@@ -73,23 +73,29 @@ ROLE_NOUN_RE = (
     r"cognitive[ \-]?control[ \-]?plane|execution[ \-]?worker|"
     r"platform[ \-]?steward|lead|worker|reviewer|specialist|steward|root)"
 )
-# Adjacent-bound patterns: a provider or role name glued to the OTHER by spaces, tabs
-# or a hyphen (never an underscore, so the HARNESS names claude_code / codex_cli and a
-# config key like `preferred_pool` cannot match). These only match WITHIN a line and do
-# not cross a newline, so a fenced-diagram line like "Control Plane\nClaude Code
-# harness" is not collapsed into a false "Control Plane Claude" adjacency.
+# Adjacent-bound patterns: a provider or role name glued to the OTHER by spaces, tabs,
+# a hyphen, or a markdown table pipe `|` (never an underscore, so the HARNESS names
+# claude_code / codex_cli and a config key like `preferred_pool` cannot match). Adding the
+# pipe closes the table-row blind spot: an `| Execution Lead | Codex |` row binds a role
+# CELL to a bare provider CELL across one pipe separator and is caught here, yet the
+# legitimate §7 rows (``| Role | pi harness + low-cost pool |``) stay clean because the
+# provider must be immediately adjacent to a role noun with no intervening token - a
+# "harness + pool" description contributes no bare provider-role adjacency. These only
+# match WITHIN a line and do not cross a newline, so a fenced-diagram line like "Control
+# Plane\nClaude Code harness" is not collapsed into a false "Control Plane Claude"
+# adjacency.
 IMMEDIATE_BINDINGS = (
     (
         "provider-role",
         re.compile(
-            r"\b(?:%s)[ \t\-\u2010]+%s(?:s\b)?" % (PROVIDER_NAME_RE, ROLE_NOUN_RE),
+            r"\b(?:%s)[ \t\-\u2010\|]+%s(?:s\b)?" % (PROVIDER_NAME_RE, ROLE_NOUN_RE),
             flags=re.IGNORECASE,
         ),
     ),
     (
         "role-provider",
         re.compile(
-            r"%s(?:s\b)?[ \t\-\u2010]+(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            r"%s(?:s\b)?[ \t\-\u2010\|]+(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
             flags=re.IGNORECASE,
         ),
     ),
@@ -1230,9 +1236,9 @@ class ArchitecturePolicyTests(unittest.TestCase):
         genuinely enforces, and its honest limits, are:
 
         - It flags a provider/model-pool name bound to a role noun in the documented
-          forms (adjacency, "is"/"are"/"run by", "for", ":", "=", "role:", "agent:",
-          and the Chinese operators provider 偏好 / 默认 provider / 偏好为 / 绑定 / 是)
-          in English OR Chinese.
+          forms (adjacency incl. a markdown table pipe `|`, "is"/"are"/"run by",
+          "for", ":", "=", "role:", "agent:", and the Chinese operators provider 偏好 /
+          默认 provider / 偏好为 / 绑定 / 是) in English OR Chinese.
         - Harness-class vocabulary stays expressible: claude_code / codex_cli / pi are
           harnesses, "Pi" is never a pool, and an intervening qualifier (Premium,
           Standard/Fast, "Claude Code harness") breaks the adjacency.
@@ -1285,6 +1291,13 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 "Execution Lead 是 first-class Engineering Control Plane，默认 provider "
                 "偏好为 Codex，但不是永久绑定。"
             ),
+            # Table rows are live architecture text too: a role CELL bound to a bare
+            # provider CELL across one `|` must trip the guard. This is the exact
+            # reintroduction vector the reviewer's P11 observation confirmed (and the
+            # shape of the §7 preference table itself, which caused the T1 contradiction
+            # to survive four passes unseen).
+            "E15 table row role-provider cell": "| Execution Lead | Codex |",
+            "E16 table header + row": "| Role | Provider |\n|---|---|\n| Execution Lead | Codex |",
         }
         for label, inserted in evasions.items():
             findings = provider_bindings_in_text(inserted)
@@ -1297,6 +1310,13 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "Root prefers the Claude Code harness with a capable pool",
             "Codex Premium Lead",
             "Pi Standard/Fast Lead",
+            # Corrected §7 preference-table rows pair a role CELL with a HARNESS + POOL
+            # description CELL, never a bare provider - they must not trip the guard even
+            # with the pipe separator in play.
+            "| Root / Cognitive Control Plane | claude_code harness + capable pool |",
+            "| Execution Lead Standard/Fast | pi harness + low-cost pool |",
+            "| Execution Lead Premium | codex-cli harness + codex pool |",
+            "| Well-scoped implementation | low-cost pool (e.g. deepseek) |",
             "Claude Code harness default / capable pool",
             "Pi Standard/Fast default becomes Codex Premium escalation on difficult work",
             "codex-cli harness + codex pool",
@@ -1337,6 +1357,42 @@ class ArchitecturePolicyTests(unittest.TestCase):
             [],
             provider_bindings_in_document(ROOT / ".agent" / "policies" / "routing.yaml"),
             "policy-config preference keys must not be flagged as prose role bindings",
+        )
+
+    def test_historical_binding_escape_hatch_only_in_adr_004(self) -> None:
+        """T3: the HISTORICAL-BINDING escape hatch exists so genuinely superseded
+        narration can be quoted verbatim, but it must never be used to park a LIVE binding
+        in a current document. The reviewer confirmed escape-hatch use is "abusable only by
+        writing a false label, unaudited by any test". This assertion makes every usage
+        audited deterministically: the marker may appear only in
+        docs/decisions/ADR-004-*.md. Any occurrence in ARCHITECTURE.md, AGENTS.md,
+        README.md, a runbook, a role/harness/provider profile, or a policy file fails here
+        instead of relying on a reader to notice a false label.
+        """
+        scanned = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
+        for directory in (ROOT / "docs", ROOT / ".agent"):
+            scanned.extend(
+                path
+                for path in directory.rglob("*")
+                if path.is_file() and path.suffix in {".md", ".yaml", ".yml"}
+            )
+
+        offenders = []
+        for path in scanned:
+            if "HISTORICAL-BINDING" not in path.read_text(
+                encoding="utf-8", errors="replace"
+            ):
+                continue
+            rel = path.relative_to(ROOT)
+            allowed = path.parent.name == "decisions" and path.name.startswith(
+                "ADR-004-"
+            )
+            if not allowed:
+                offenders.append(str(rel))
+        self.assertEqual(
+            [],
+            offenders,
+            "HISTORICAL-BINDING escape hatch used outside docs/decisions/ADR-004-*.md",
         )
 
     def test_root_selects_execution_lead_harness(self) -> None:

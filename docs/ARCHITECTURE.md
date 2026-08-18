@@ -735,7 +735,7 @@ worker-start` 启动，harness 选择从不绕过 worker-start。
 
 | Work | Preferred harness / pool | Notes |
 |---|---|---|
-| Root / Cognitive Control Plane | pi harness + capable pool | problem definition 与 judgment |
+| Root / Cognitive Control Plane | claude_code harness + capable pool | problem definition 与 judgment |
 | Execution Lead Standard/Fast | pi harness + low-cost pool | well-scoped LOW/MEDIUM work 默认（Root 决定） |
 | Execution Lead Premium | codex-cli harness + codex pool | difficult engineering / HIGH-risk escalation |
 | Well-scoped implementation/search/test/mechanical refactor | low-cost pool (e.g. deepseek) | preferred Execution Worker；不绑定 pool |
