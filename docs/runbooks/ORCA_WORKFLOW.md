@@ -56,6 +56,30 @@ ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
 ```
 
+Field semantics are mandatory:
+
+- `WORKTREE / BASE COMMIT` is Orca placement plus the source ref used to create it.
+- `LEAD BRANCH` is the target branch.
+- `INTEGRATION_BASE_SHA` is the immutable commit the Lead worktree must exactly equal
+  before any tracked-file modification.
+- `ALLOWED CHANGED PATHS / SCOPE` is the path boundary.
+- `REQUIRED TESTS / EVALS` names commands/suites;
+  `VERIFICATION REQUIREMENTS` adds base, ancestry, scope and integrated-state gates; and
+  `VERIFICATION EVIDENCE REQUIRED` names outputs, mappings and uncertainty to retain.
+- `RESULT MODE` is the immutable unit returned to the Root; V1 writable Git work uses an
+  ordered linear Git commit list.
+
+The Lead must run this gate before its first tracked-file edit:
+
+```text
+test -z "$(git status --porcelain)"
+git cat-file -e <integration_base_sha>^{commit}
+test "$(git rev-parse HEAD)" = "$(git rev-parse <integration_base_sha>^{commit})"
+```
+
+A missing base or mismatch stops the Lead under condition 6; the Root amends placement/base
+or redispatches without taking over the edit/verify/fix loop.
+
 The packet's `ESCALATION CONTRACT` may narrow the standing six-condition list but may not
 extend or redefine it.
 
@@ -150,7 +174,7 @@ INTEGRATION_BASE_SHA
 ALLOWED CHANGED PATHS / SCOPE
 CONSTRAINTS
 VERIFICATION REQUIREMENTS
-RESULT MODE: ORDERED GIT COMMIT LIST
+RESULT MODE: ORDERED LINEAR GIT COMMIT LIST
 EXPECTED OUTPUT
 ACCEPTANCE
 ```
@@ -162,7 +186,8 @@ low-level Orca path is:
 test -z "$(git status --porcelain)"
 git rev-parse HEAD
 git branch worker-base/<worker_task_id> <integration_base_sha>
-ORCA worktree create --name <worker_name> --base-branch worker-base/<worker_task_id> --agent <agent_id> --setup run --json
+ORCA worktree create --name <worker_name> \
+  --base-branch worker-base/<worker_task_id> --agent <agent_id> --setup run --json
 ORCA terminal wait --terminal <worker_handle> --for tui-idle --timeout-ms 60000 --json
 ORCA orchestration dispatch --task <worker_task_id> --to <worker_handle> --inject --json
 ```
@@ -171,6 +196,27 @@ Read the create receipt and use its exact worktree/terminal identifiers. If the 
 version-matched guide offers a composed `worker-start` path that accepts an explicit
 base ref, it may replace the low-level create/dispatch sequence; omission of the base is
 not allowed.
+
+Alignment is owned by the Lead, not the Worker. The recipe above is the fresh-worktree
+path. To consider an existing worktree, the Lead runs the following **before dispatch**:
+
+```text
+test -z "$(git status --porcelain)"
+git cat-file -e <integration_base_sha>^{commit}
+git rev-parse HEAD
+git rev-parse <integration_base_sha>^{commit}
+test -z "$(git rev-list <integration_base_sha>..HEAD)"
+test -z "$(git for-each-ref --format='%(refname)' refs/heads/<fresh_worker_branch>)"
+git checkout -b <fresh_worker_branch> <integration_base_sha>
+test "$(git rev-parse HEAD)" = "$(git rev-parse <integration_base_sha>^{commit})"
+```
+
+If HEAD already equals the base, reuse needs no checkout. If it differs, the first
+`rev-list` test must prove the current HEAD has no commits outside the declared base, and
+the second test must prove the new branch name is unused. If either fails, stop, preserve
+all refs/commits and redispatch from a fresh explicitly based worktree; if resources or
+authority prevent that, use condition 6. Never use `git reset --hard` or
+`git checkout -B` to repoint an existing result branch.
 
 Before any tracked-file modification, the Worker runs:
 
@@ -182,8 +228,13 @@ git rev-parse <integration_base_sha>^{commit}
 test "$(git rev-parse HEAD)" = "$(git rev-parse <integration_base_sha>^{commit})"
 ```
 
-The final equality is mandatory. If the declared base does not exist or exact alignment
-cannot be established, the Worker stops and escalates; it must not edit on a guessed base.
+The final equality is mandatory and the Worker is verify-only. If `cat-file` fails, stop
+and report “base not obtainable” to the Lead; inability to obtain it maps to condition 6.
+If the base exists but equality fails, stop and report “HEAD not aligned”; do not
+self-align. The Lead either uses the guarded path above or redispatches a fresh worktree.
+If it cannot safely align without discarding commits, that separate blocker maps to
+condition 6. No tracked-file edit may occur on a guessed or mismatched base.
+
 After implementation and required verification, the Worker creates commits and captures
 the immutable result:
 
@@ -193,13 +244,14 @@ git diff --check
 <required verification commands>
 git add <allowed paths>
 git commit -m "<message>"
+test -z "$(git rev-list --merges <integration_base_sha>..HEAD)"
 git rev-parse HEAD
 git rev-list --reverse <integration_base_sha>..HEAD
 git diff --name-only <integration_base_sha>..HEAD
 ```
 
 The Worker sends `worker_done` with a result packet containing
-`integration_base_sha`, `worker_head_sha`, the ordered commit SHA list, changed paths,
+`integration_base_sha`, `worker_head_sha`, the ordered linear commit SHA list, changed paths,
 verification commands/results and unresolved uncertainty. No uncommitted working-tree
 result is accepted.
 
@@ -214,25 +266,41 @@ git rev-parse <integration_base_sha>^{commit}
 git rev-parse <expected_integration_base_sha>^{commit}
 git merge-base --is-ancestor <integration_base_sha> <worker_head_sha>
 git rev-list --reverse <integration_base_sha>..<worker_head_sha>
+test -z "$(git rev-list --merges <integration_base_sha>..<worker_head_sha>)"
 git diff --name-only <integration_base_sha>..<worker_head_sha>
 git diff --check <integration_base_sha>..<worker_head_sha>
 git diff <integration_base_sha>..<worker_head_sha>
 ```
 
 The two base resolutions must be equal; the `rev-list --reverse` output must exactly
-match the returned ordered list. The Lead checks every changed path against the authorized
-scope and rejects unexpected files. After retaining this evidence, V1 has exactly one
-integration operation:
+match the returned ordered list, and the `rev-list --merges` assertion must succeed.
+The Lead checks every changed path against the authorized scope and rejects unexpected
+files. After retaining this evidence, anchor the immutable result before any terminal
+release:
 
 ```text
-git cherry-pick <worker_commit_sha_1> <worker_commit_sha_2> ...
+git update-ref refs/worker-results/<worker_task_id> <worker_head_sha>
+```
+
+V1 has exactly one integration operation, run one Worker commit at a time:
+
+```text
+git cherry-pick -x <worker_commit_sha_1>
+git rev-parse HEAD
+# record <worker_commit_sha_1> -> <integrated_commit_sha_1>
+git cherry-pick -x <worker_commit_sha_2>
+git rev-parse HEAD
+# record <worker_commit_sha_2> -> <integrated_commit_sha_2>
 <required verification commands>
 ```
 
-Do not merge the Worker branch, reset the Lead branch to Worker HEAD, fast-forward it, take
-over the Worker branch, or infer integration from Orca lineage. The Execution Lead owns
-integration conflicts. The Worker never modifies the Lead worktree. The Lead resolves only
-when the resolution is clearly within the Execution Packet and records it:
+The `-x` trailer preserves source provenance in each integrated commit; the explicit
+worker-to-integrated SHA pairs are required integration evidence.
+
+Do not merge the Worker branch, reset the Lead branch to Worker HEAD, fast-forward the
+Lead branch, take over the Worker branch, or infer integration from Orca lineage. The
+Execution Lead owns integration conflicts. The Worker never modifies the Lead worktree.
+For a conflict that is clearly within the Execution Packet, the Lead records and resolves:
 
 ```text
 git status --short
@@ -241,27 +309,59 @@ git cherry-pick --continue
 <required verification commands>
 ```
 
-Otherwise the Lead runs `git cherry-pick --abort` and escalates or redispatches. Required
-verification is rerun after every conflict resolution.
+Otherwise run `git cherry-pick --abort` and use condition 6 for a packet amendment or
+redispatch. If Git instead reports that the current pick is `now empty`, do not treat
+it as a conflict and never use `--allow-empty`. Prove the content is already present:
+
+```text
+git show --stat --patch <worker_commit_sha>
+git diff --cached --quiet
+<targeted verification proving the Worker change is present>
+# record <worker_commit_sha> -> ALREADY_PRESENT@<lead_head_sha> plus reason
+git cherry-pick --skip
+<required verification commands>
+```
+
+If deterministic verification cannot prove the content is present, run
+`git cherry-pick --abort` and use condition 5. Required verification is rerun and
+recorded after every conflict resolution or empty-pick skip.
 
 Worker and Lead lifecycle ordering is:
 
 ```text
 Worker: implement → verify → commit → send immutable result packet → worker_done
-Lead:   receive result → validate → integrate → verify integrated state → acknowledge
+Lead:   receive result → anchor → validate → integrate → verify integrated state → acknowledge
 ```
 
 Worker worktree/branch must not be deleted until integration succeeds or the Execution
-Lead explicitly rejects the result. After the immutable result arrives, Orca may release
-the agent/terminal before Delivery acknowledgment, but must keep the Worker branch and
-Git objects recoverable until integration succeeds or the Lead explicitly rejects the
-result. A valid
-`worker_done` is not itself Git acceptance.
+Lead explicitly rejects the result. After the immutable result arrives, the Lead first
+creates the `refs/worker-results/<worker_task_id>` anchor; Orca may then release the
+agent/terminal before Delivery acknowledgment. Worker branch, Git objects and anchor stay
+recoverable until settlement. A valid `worker_done` is not itself Git acceptance.
 
-For parallel Workers, validate each result independently and serialize integration. After
-each cherry-pick, apply every later ordered commit list onto the new Lead HEAD. The Lead
-owns conflicts; changed-path overlap or semantic interaction that invalidates the original
-acceptance assumptions requires escalation or redispatch.
+After success or explicit rejection, and only after SHA mappings plus verification evidence
+are durable, clean applicable temporary refs:
+
+```text
+git update-ref -d refs/worker-results/<worker_task_id>
+git update-ref -d refs/heads/worker-base/<worker_task_id>
+git push <remote> --delete worker-base/<worker_task_id> worker-result/<worker_task_id>
+```
+
+For parallel Workers, validate each result independently and serialize integration. Apply
+each later ordered commit list onto the new Lead HEAD and run integrated-state verification
+after every result. A textual clean apply followed by verification failure remains in the
+Lead fix loop unless diagnosis, deterministic uncertainty or scope requires condition 3,
+5 or 6. `Semantic interaction` means verification passed but evidence shows a documented
+acceptance assumption is false; use condition 2 for ambiguity or condition 6 for packet
+amendment/redispatch.
+
+These Git stop points do not add escalation conditions. Base/ref unavailable, unsafe
+alignment, conflict outside the packet and remote authorization/resource blockers map to
+condition 6; an unprovable empty pick maps to condition 5; parallel findings map only to
+condition 2, 3, 5 or 6 as defined above. A safe routine redispatch stays with the Lead.
+The Root amends authority/scope or routes a human gate and never takes over the Git
+integration loop.
 
 The Execution Lead re-engages the Root only when:
 
@@ -329,24 +429,32 @@ reachable through an explicit fetchable Git ref before dispatch, then exchange o
 # Lead-side publication
 git push <remote> <integration_base_sha>:refs/heads/worker-base/<worker_task_id>
 
-# Worker-side acquisition and mandatory alignment check
+# Remote Worker-side guarded alignment before any tracked-file edit
+test -z "$(git status --porcelain)"
 git fetch <remote> refs/heads/worker-base/<worker_task_id>
 git cat-file -e <integration_base_sha>^{commit}
-git rev-parse HEAD
-git rev-parse <integration_base_sha>^{commit}
+test -z "$(git rev-list <integration_base_sha>..HEAD)"
+test -z "$(git for-each-ref --format='%(refname)' refs/heads/<fresh_remote_worker_branch>)"
+git checkout -b <fresh_remote_worker_branch> <integration_base_sha>
+test "$(git rev-parse HEAD)" = "$(git rev-parse <integration_base_sha>^{commit})"
 
 # Worker-side result publication after commit
+test -z "$(git rev-list --merges <integration_base_sha>..<worker_head_sha>)"
 git push <remote> <worker_head_sha>:refs/heads/worker-result/<worker_task_id>
 
-# Lead-side exact result acquisition
+# Lead-side exact result acquisition and anchor
 git fetch <remote> refs/heads/worker-result/<worker_task_id>
 git cat-file -e <worker_head_sha>^{commit}
+git update-ref refs/worker-results/<worker_task_id> <worker_head_sha>
 ```
 
-The Lead then performs the same ancestry, ordered-list, scope, diff and verification checks
-from §4.1 and cherry-picks the exact verified commits. Never exchange writable project
+Both pre-checks before `checkout -b` must succeed. If HEAD contains commits outside the
+base or the fresh branch name exists, stop, preserve all refs and redispatch; inability to
+do that maps to condition 6. Never use `reset --hard` or `checkout -B`. The Lead
+then performs the same ancestry, linear-order, scope, diff and verification checks from
+§4.1, records SHA mappings and `cherry-pick -x` exact verified commits. After settlement,
+clean the temporary remote refs as §4.1 specifies. Never exchange writable project
 directories between nodes.
-
 
 ## 6. Runtime-Unavailable Degraded Mode
 

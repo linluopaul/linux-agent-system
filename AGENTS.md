@@ -98,6 +98,15 @@ ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
 ```
 
+The packet fields are distinct: `WORKTREE / BASE COMMIT` identifies placement and the
+source ref used to create it; `LEAD BRANCH` is the target branch;
+`INTEGRATION_BASE_SHA` is the immutable commit that the Lead worktree must exactly match
+before any tracked-file modification; `ALLOWED CHANGED PATHS / SCOPE` is the path boundary;
+`VERIFICATION REQUIREMENTS` defines base, ancestry, scope and integrated-state gates beyond
+the named tests/evals; and `RESULT MODE` defines the immutable unit returned to the Root.
+`VERIFICATION EVIDENCE REQUIRED` defines which commands, results, SHA mappings and
+uncertainty the Lead must retain.
+
 The packet's `ESCALATION CONTRACT` may narrow the standing conditions below for a task,
 but it may never extend or redefine this closed list.
 
@@ -252,30 +261,52 @@ Use one active task per branch/worktree.
 
 Do not modify another agent's active worktree.
 
-Every writable Execution Lead-to-Worker dispatch must declare an immutable
-`integration_base_sha` equal to the Execution Lead HEAD. Before any tracked-file
-modification, the Worker must verify that its working tree is clean, the base exists
-locally and `git rev-parse HEAD` exactly equals `integration_base_sha`; if the base
-cannot be obtained, stop and escalate instead of using a guessed base. Orca parent/child
-lineage is orchestration provenance, not proof of Git ancestry.
+Every writable Root-to-Execution-Lead packet and Execution Lead-to-Worker dispatch must
+declare an immutable `integration_base_sha`. The Root aligns the Lead worktree when it is
+created; the Lead similarly aligns a fresh Worker worktree from an explicit base ref before
+dispatch. An existing worktree may be reused only when it is clean and already at the
+declared base, or when the guarded runbook procedure proves there are no commits ahead and
+creates a fresh Worker branch without repointing an existing result branch.
 
-V1 accepts only an immutable ordered Git commit list from a Worker. No uncommitted
-working-tree result is accepted.
+Before any tracked-file modification, the Worker is verify-only: its working tree must be
+clean, the base must exist locally and `git rev-parse HEAD` must exactly equal
+`git rev-parse <integration_base_sha>^{commit}`. If the base cannot be obtained, or if
+the base exists but HEAD is not exactly equal, stop and escalate to the Lead instead of
+using a guessed base. The Worker must not use `git reset --hard`, `git checkout -B`
+or any ref-repointing command to self-align. Preserve every existing commit and redispatch
+from a safe worktree; inability to do so maps to closed re-entry condition 6. Orca
+parent/child lineage is orchestration provenance, not proof of Git ancestry.
 
-The V1 integration operation is `git cherry-pick` of that ordered commit list into the
-Execution Lead branch. Do not merge the Worker branch, reset the Lead branch to Worker
-HEAD, fast-forward the Lead branch, or infer integration from Orca lineage.
+V1 accepts only an immutable ordered linear Git commit list from a Worker. The Worker and
+Lead both require no merge commit in `integration_base_sha..worker_head_sha`. No
+uncommitted working-tree result is accepted.
+
+The V1 integration operation is `git cherry-pick -x` of each ordered commit into the
+Execution Lead branch. Before release, anchor `worker_head_sha` under
+`refs/worker-results/<worker_task_id>`; after each successful pick, record the
+`worker_commit_sha → integrated_commit_sha` mapping. Do not merge the Worker branch,
+reset the Lead branch to Worker HEAD, fast-forward the Lead branch, or infer integration
+from Orca lineage.
 
 The Execution Lead owns integration conflicts. The Worker must never modify the Lead
 worktree; the Lead may resolve a cherry-pick conflict only within the Execution Packet,
-otherwise it must abort the cherry-pick and escalate or redispatch, then rerun required
-verification after any resolution. The Lead serializes parallel Worker integration and
-cherry-picks later results onto the new Lead HEAD.
+otherwise it must run `git cherry-pick --abort` and use condition 6 for a packet
+amendment or redispatch. For a `now empty` pick, deterministically prove the content is
+already present, record `worker_commit_sha → ALREADY_PRESENT@<lead_head_sha>` and its
+reason, then run `git cherry-pick --skip`; never use `--allow-empty`. If proof is
+impossible, abort and use condition 5. Rerun required verification after every resolution
+or skip.
+
+The Lead serializes parallel Worker integration, cherry-picks later results onto the new
+Lead HEAD and runs integrated-state verification after each result. Verification failure
+stays with the Lead unless it reaches closed condition 3, 5 or 6; evidence that a documented
+acceptance assumption is false maps to condition 2 or 6.
 
 The Worker worktree/branch must not be deleted until integration succeeds or the Execution
-Lead explicitly rejects the result. Agent/terminal release may follow receipt of the
-immutable commit result, but its Git objects and branch must remain recoverable until
-settlement.
+Lead explicitly rejects the result. Agent/terminal release may follow receipt and Lead-side
+anchoring of the immutable commit result, but its Git objects, branch and anchor must remain
+recoverable until settlement. Delete temporary local/remote result refs only after durable
+SHA mappings and verification evidence are recorded.
 
 If an Execution Lead fails mid-flight, the Root owns parent-Dispatch lifecycle recovery
 and replacement, but it does not enter the failed Lead's edit/verify loop. Preserve the

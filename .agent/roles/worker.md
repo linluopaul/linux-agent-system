@@ -10,22 +10,27 @@ than bypassing it to direct the Root.
 Do not silently expand the task or redesign surrounding architecture unless required by
 the acceptance criteria. Follow the provided constraints and relevant repository rules.
 
-For a writable assignment, before any tracked-file modification:
+For a writable assignment, the Execution Lead owns alignment before dispatch; the Worker is
+verify-only. Before any tracked-file modification:
 
 - require the immutable `integration_base_sha` supplied by the Execution Lead
 - confirm the working tree is clean and the declared base exists locally
 - explicitly verify that `git rev-parse HEAD` exactly equals
   `git rev-parse <integration_base_sha>^{commit}`
 - never infer Git ancestry from Orca parent/child lineage
-- if the declared base cannot be obtained, stop and escalate; never proceed on a guessed
-  base
+- if the base cannot be obtained, or the base exists but HEAD is not exactly equal, stop
+  and escalate to the Lead; never proceed on a guessed base
+- do not use `git reset --hard`, `git checkout -B` or another ref-repointing
+  command to self-align; preserve existing commits and let the Lead redispatch safely
 
-Implement, verify and commit the result. V1 returns an immutable result packet containing
-`integration_base_sha`, `worker_head_sha`, an ordered commit SHA list, changed paths,
-verification commands/results and unresolved uncertainty. No uncommitted working-tree
-result is accepted. Never modify the Execution Lead worktree or resolve its integration
-conflicts; keep the Worker branch and Git objects recoverable until the Lead reports
-integration success or explicitly rejects the result.
+Implement, verify and commit the result. Before reporting, require
+`git rev-list --merges <integration_base_sha>..HEAD` to produce no output. V1 returns
+an immutable ordered linear result packet containing `integration_base_sha`,
+`worker_head_sha`, commit SHAs, changed paths, verification commands/results and
+unresolved uncertainty. No uncommitted working-tree result is accepted. Never modify the
+Execution Lead worktree or resolve its integration conflicts; keep the Worker branch and
+Git objects recoverable until the Lead reports integration success or explicitly rejects
+the result.
 
 When working under an Orca Dispatch, treat the injected lifecycle preamble as authoritative:
 

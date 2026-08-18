@@ -30,45 +30,62 @@ discard Lead work, while a base-to-head review diff would misleadingly report ro
 
 Adopt Lead ↔ Worker Git Integration Contract v1 for every writable Worker dispatch:
 
-1. The dispatch carries an immutable `integration_base_sha` equal to the Execution Lead
-   HEAD, plus the Lead branch, allowed changed paths/scope, verification requirements and
-   result mode.
-2. Before any tracked-file modification, the Worker requires a clean working tree, obtains
-   the declared base locally, aligns Worker HEAD exactly to it and explicitly verifies
-   `git rev-parse HEAD` equality. If the base cannot be obtained, the Worker stops and
-   escalates instead of guessing.
-3. V1 accepts only an immutable ordered Git commit list. The result packet contains
-   `integration_base_sha`, `worker_head_sha`, ordered commit SHAs, changed paths,
-   verification commands/results and unresolved uncertainty. No uncommitted working-tree
-   result is accepted.
-4. Before integration, the Lead requires a clean worktree; confirms the expected base;
-   validates Worker ancestry and commit order; inspects the base-to-head diff; verifies
-   every changed path against authorized scope; rejects unexpected files; and retains
-   verification evidence.
-5. The V1 integration operation is `git cherry-pick` of the exact ordered Worker commit
-   list into the Lead branch. Merging the Worker branch, resetting the Lead branch to
-   Worker HEAD, fast-forwarding it and inferring integration from Orca lineage are
-   prohibited.
+1. Root-to-Lead `integration_base_sha` is the immutable commit the Lead worktree must
+   exactly match before editing; `WORKTREE / BASE COMMIT` describes placement/source ref,
+   `LEAD BRANCH` the target, `ALLOWED CHANGED PATHS / SCOPE` the path boundary,
+   `VERIFICATION REQUIREMENTS` the non-test gates and `RESULT MODE` the immutable
+   returned unit. Each Worker dispatch then sets its base to the Execution Lead HEAD.
+2. The Lead owns alignment before dispatch: fresh worktrees use an explicit base ref.
+   Existing worktrees may be reused only after clean/ahead-commit guards prove no result
+   commit can be discarded and a fresh branch name is used. The Worker is verify-only:
+   before any tracked edit it explicitly verifies `git rev-parse HEAD` equals the base.
+   A missing base or mismatch stops work; `reset --hard`, `checkout -B` and other
+   self-alignment ref repointing are prohibited. Unsafe alignment preserves commits and
+   triggers redispatch or condition 6.
+3. V1 accepts only an immutable ordered linear Git commit list with no merge commits. The
+   result packet contains `integration_base_sha`, `worker_head_sha`, ordered commit
+   SHAs, changed paths, verification commands/results and unresolved uncertainty. No
+   uncommitted working-tree result is accepted.
+4. Before integration, the Lead requires a clean worktree; confirms the expected base; runs
+   `git merge-base --is-ancestor`; validates exact `git rev-list --reverse` order and
+   absence of merge commits; inspects the base-to-head diff; verifies every changed path
+   against authorized scope; rejects unexpected files; and retains evidence.
+5. The V1 integration operation is one-at-a-time `git cherry-pick -x`. Before release,
+   the Lead anchors the Worker head at `refs/worker-results/<worker_task_id>` and records
+   every `worker_commit_sha → integrated_commit_sha` mapping. Merging the Worker branch,
+   resetting the Lead branch to Worker HEAD, fast-forwarding the Lead branch and inferring
+   integration from Orca lineage are prohibited.
 6. The Execution Lead owns integration conflicts. The Worker never modifies the Lead
-   worktree. The Lead resolves only within the Execution Packet; otherwise it aborts the
-   cherry-pick and escalates or redispatches. Required verification is rerun after any
-   resolution.
+   worktree. The Lead resolves only within the Execution Packet; otherwise it runs
+   `git cherry-pick --abort` and uses condition 6. On `now empty`, the Lead proves
+   content is present, records `ALREADY_PRESENT@<lead_head_sha>` plus reason and uses
+   `git cherry-pick --skip`, never `--allow-empty`. Unprovable content maps to
+   condition 5. Required verification follows every resolution or skip.
 7. Lifecycle order is Worker implement → verify → commit → immutable result →
-   `worker_done`, then Lead receive → validate → integrate → verify integrated state →
-   acknowledge. Agent/terminal release may follow receipt of the immutable result, but the
-   Worker branch and Git objects remain recoverable until integration succeeds or the Lead
-   explicitly rejects the result.
-8. The Lead validates parallel results independently and serializes integration. Later
-   Worker commits are cherry-picked onto the new Lead HEAD. Changed-path overlap or
-   semantic interaction that invalidates acceptance assumptions triggers escalation or
-   redispatch.
-9. On another node, the base first becomes reachable through an explicit fetchable Git
-   ref. The Worker pushes result commits to a task/worker branch or temporary ref, and the
-   Lead fetches exact returned SHAs before applying the same validation and cherry-pick
-   procedure. Writable project directories are never exchanged between nodes.
+   `worker_done`, then Lead receive → anchor → validate → integrate → verify integrated
+   state → acknowledge. Terminal release follows anchoring, but Worker branch, objects and
+   anchor remain recoverable until success or explicit rejection. Temporary refs are
+   cleaned only after mappings and verification evidence are durable.
+8. The Lead validates parallel results independently and serializes integration onto the
+   new Lead HEAD, running integrated-state verification after every result. Verification
+   failures route only under conditions 3/5/6 when their definitions apply. Semantic
+   interaction means verification passed but evidence disproves a documented acceptance
+   assumption; it maps to condition 2 or 6.
+9. On another node, the base first becomes reachable through an explicit fetchable Git ref.
+   A clean/ahead-commit guard creates a fresh remote Worker branch and runs the same exact
+   equality test without discarding refs. The Worker pushes result commits to a task ref;
+   the Lead fetches and anchors exact SHAs before the same ancestry, linearity, scope, diff,
+   mapping and `cherry-pick -x` procedure. Writable project directories are never
+   exchanged between nodes.
 10. Orca parent/child lineage is orchestration provenance, not proof of Git ancestry.
     Every writable worktree requires an explicitly verified Git base, and nested writable
     Workers do not rely on the repository default base.
+
+These stop points do not extend ADR-002's closed list. Base/ref unavailable, unsafe
+alignment, out-of-packet conflict and remote authority blockers map to condition 6;
+unresolved empty-pick proof maps to condition 5; parallel findings map only to condition
+2/3/5/6. Routine safe redispatch remains with the Lead, and Root never takes over Git
+integration.
 
 ## Relationship to ADR-001 and ADR-002
 
@@ -96,7 +113,9 @@ Costs and residual risks:
 
 ## Verification
 
-Repository policy tests assert the writable `integration_base_sha` requirement,
-cherry-pick-only V1 operation, prohibited merge/reset/fast-forward inference, Lead conflict
-ownership, commit-only Worker result, branch retention, remote fetchable refs and the
-Orca-lineage/Git-ancestry distinction.
+Repository policy tests assert exact base equality and safe alignment, normalized full
+prohibition clauses, Lead-side ancestry/order/scope/linearity, `cherry-pick -x`
+provenance, SHA mapping, empty-pick handling, closed-condition routes, commit-only Worker
+results, anchored branch retention, remote guarded fetchable refs and the
+Orca-lineage/Git-ancestry distinction. Mutation probes additionally prove the prohibition
+test fails when its normative sentence is removed or inverted.

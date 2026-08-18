@@ -22,27 +22,43 @@ in final evidence. Never call `run-use` on the Root-owned Run. Settle and releas
 sub-dispatch before the parent `worker_done`; Worker questions terminate at the Lead, and
 the Root receives only compressed evidence.
 
-For every writable Worker dispatch, record the Lead branch and immutable
-`integration_base_sha` equal to the current Lead HEAD, allowed changed paths/scope,
-verification requirements and V1 result mode (ordered Git commit list). Require the Worker
-to verify exact base alignment before any tracked-file modification; Orca parent/child
-lineage is orchestration provenance, not proof of Git ancestry.
+Before any tracked-file edit, verify the Lead worktree is clean and
+`git rev-parse HEAD` exactly equals the Root packet's `integration_base_sha`. For every
+writable Worker dispatch, record the Lead branch and immutable base equal to the current
+Lead HEAD, allowed changed paths/scope, verification requirements and V1 ordered-linear
+commit-list result mode.
+
+The Lead owns alignment before dispatch: create a fresh Worker worktree from an explicit
+base ref. Reuse an existing worktree only when clean and already equal, or when the guarded
+runbook sequence proves it has no commits ahead and creates a new branch without repointing
+a retained result ref. The Worker is verify-only and must stop on missing base or HEAD
+mismatch; never ask it to `reset --hard` or `checkout -B`. Preserve existing commits.
+Orca parent/child lineage is orchestration provenance, not proof of Git ancestry.
 
 On receipt of an immutable Worker result packet:
 
-- require `integration_base_sha`, `worker_head_sha`, the ordered commit SHA list,
-  changed paths, verification commands/results and unresolved uncertainty
-- reject uncommitted working-tree results
-- while the Lead working tree is clean, validate the expected base, ancestry, ordered
-  commits, base-to-head diff and every changed path against authorized scope
-- use `git cherry-pick` as the V1 integration operation; never merge the Worker branch,
-  reset or fast-forward the Lead branch, or infer integration from Orca lineage
-- own every integration conflict; resolve only within the Execution Packet, otherwise
-  abort the cherry-pick and escalate or redispatch, then rerun required verification
-- serialize parallel Worker integration and cherry-pick later results onto the new Lead
-  HEAD
-- keep the Worker branch and Git objects recoverable until integration succeeds or the
-  result is explicitly rejected, even if the agent/terminal has already been released
+- require `integration_base_sha`, `worker_head_sha`, the ordered linear commit SHA
+  list, changed paths, verification commands/results and unresolved uncertainty
+- reject uncommitted results and reject any merge commit in the result range
+- while the Lead worktree is clean, validate the expected base,
+  `git merge-base --is-ancestor`, exact `git rev-list --reverse` order, base-to-head
+  diff and every changed path against authorized scope
+- before terminal release, anchor `worker_head_sha` at
+  `refs/worker-results/<worker_task_id>`
+- use `git cherry-pick -x` one commit at a time as the V1 integration operation and
+  record every `worker_commit_sha → integrated_commit_sha` mapping; never merge the
+  Worker branch, reset the Lead branch to Worker HEAD, fast-forward the Lead branch, or
+  infer integration from Orca lineage
+- own every integration conflict; resolve only within the Execution Packet, otherwise run
+  `git cherry-pick --abort` and use condition 6 for amendment or redispatch
+- on `now empty`, prove the content already exists, record
+  `worker_commit_sha → ALREADY_PRESENT@<lead_head_sha>` and the reason, then
+  `git cherry-pick --skip`; never `--allow-empty`, and use condition 5 if proof is
+  impossible
+- serialize parallel integration onto the new Lead HEAD and run integrated-state
+  verification after each result; route only documented condition 2/3/5/6 cases to Root
+- keep Worker branch, objects and anchor recoverable until success or explicit rejection;
+  only then clean temporary refs after durable mappings and verification evidence exist
 
 Re-engage the Root only when:
 

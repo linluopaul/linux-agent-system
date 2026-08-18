@@ -378,8 +378,31 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 documents[path].lower(),
                 path,
             )
+        self.assertIn(
+            "`git rev-parse HEAD` must exactly equal "
+            "`git rev-parse <integration_base_sha>^{commit}`",
+            documents["AGENTS.md"],
+        )
+        self.assertIn(
+            "explicitly verify that `git rev-parse HEAD` exactly equals "
+            "`git rev-parse <integration_base_sha>^{commit}`",
+            documents[".agent/roles/worker.md"],
+        )
+        self.assertIn(
+            'test "$(git rev-parse HEAD)" = '
+            '"$(git rev-parse <integration_base_sha>^{commit})"',
+            documents["docs/runbooks/ORCA_WORKFLOW.md"],
+        )
         for path in ("AGENTS.md", ".agent/roles/worker.md", "docs/ARCHITECTURE.md"):
             self.assertIn("stop and escalate", documents[path].lower(), path)
+        for path in (
+            "AGENTS.md",
+            ".agent/roles/worker.md",
+            "docs/runbooks/ORCA_WORKFLOW.md",
+        ):
+            self.assertIn("git reset --hard", documents[path], path)
+            self.assertIn("git checkout -B", documents[path], path)
+            self.assertIn("preserve", documents[path].lower(), path)
 
     def test_v1_integration_operation_is_cherry_pick(self) -> None:
         documents = {
@@ -403,20 +426,37 @@ class ArchitecturePolicyTests(unittest.TestCase):
     def test_v1_prohibits_branch_merge_reset_fast_forward_and_lineage_inference(
         self,
     ) -> None:
-        documents = {
-            "AGENTS.md": normalize(read("AGENTS.md")).lower(),
-            ".agent/roles/execution-lead.md": normalize(
-                read(".agent/roles/execution-lead.md")
-            ).lower(),
-            "docs/ARCHITECTURE.md": normalize(read("docs/ARCHITECTURE.md")).lower(),
-            "docs/runbooks/ORCA_WORKFLOW.md": normalize(
-                read("docs/runbooks/ORCA_WORKFLOW.md")
-            ).lower(),
+        expected_prohibitions = {
+            "AGENTS.md": (
+                "do not merge the worker branch, reset the lead branch to worker head, "
+                "fast-forward the lead branch, or infer integration from orca lineage"
+            ),
+            ".agent/roles/execution-lead.md": (
+                "never merge the worker branch, reset the lead branch to worker head, "
+                "fast-forward the lead branch, or infer integration from orca lineage"
+            ),
+            "docs/ARCHITECTURE.md": (
+                "v1 明确禁止 merge worker branch、reset lead branch to worker head、"
+                "fast-forward lead branch，或从 orca lineage infer integration。"
+            ),
+            "docs/runbooks/ORCA_WORKFLOW.md": (
+                "do not merge the worker branch, reset the lead branch to worker head, "
+                "fast-forward the lead branch, take over the worker branch, or infer "
+                "integration from orca lineage"
+            ),
+            "docs/decisions/ADR-003-lead-worker-git-integration-contract.md": (
+                "merging the worker branch, resetting the lead branch to worker head, "
+                "fast-forwarding the lead branch and inferring integration from orca "
+                "lineage are prohibited"
+            ),
         }
 
-        for path, document in documents.items():
-            for prohibited in ("merge", "reset", "fast-forward", "infer integration"):
-                self.assertIn(prohibited, document, path)
+        for path, prohibition in expected_prohibitions.items():
+            self.assertIn(prohibition, normalize(read(path)).lower(), path)
+        self.assertIn(
+            "git cherry-pick --abort",
+            normalize(read("docs/runbooks/ORCA_WORKFLOW.md")),
+        )
 
     def test_execution_lead_owns_integration_conflicts(self) -> None:
         for path in (
@@ -433,7 +473,8 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
         lead = normalize(read(".agent/roles/execution-lead.md")).lower()
         self.assertIn("own every integration conflict", lead)
-        self.assertIn("abort the cherry-pick and escalate or redispatch", lead)
+        self.assertIn("git cherry-pick --abort", lead)
+        self.assertIn("condition 6", lead)
 
     def test_worker_result_must_be_committed(self) -> None:
         for path in (
@@ -464,9 +505,11 @@ class ArchitecturePolicyTests(unittest.TestCase):
             )
             self.assertIn("git objects", normalized, path)
             self.assertIn("recoverable", normalized, path)
+            self.assertIn("refs/worker-results/<worker_task_id>", normalized, path)
 
         lead = normalize(read(".agent/roles/execution-lead.md")).lower()
-        self.assertIn("recoverable until integration succeeds", lead)
+        self.assertIn("refs/worker-results/<worker_task_id>", lead)
+        self.assertIn("recoverable until success or explicit rejection", lead)
 
     def test_remote_worker_uses_fetchable_git_refs(self) -> None:
         architecture = normalize(read("docs/ARCHITECTURE.md")).lower()
@@ -487,6 +530,10 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("git push", runbook)
         self.assertIn("git fetch", runbook)
         self.assertIn("exact returned sha", architecture)
+        self.assertIn("git checkout -b <fresh_remote_worker_branch>", runbook)
+        self.assertIn("git rev-list <integration_base_sha>..head", runbook)
+        self.assertIn("git update-ref refs/worker-results/<worker_task_id>", runbook)
+        self.assertIn("never use `reset --hard` or `checkout -b`", runbook)
         for path, document in (
             ("docs/ARCHITECTURE.md", architecture),
             ("docs/runbooks/ORCA_WORKFLOW.md", runbook),
@@ -496,6 +543,79 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 document,
                 path,
             )
+
+    def test_lead_validates_worker_ancestry_scope_and_linearity(self) -> None:
+        architecture = normalize(read("docs/ARCHITECTURE.md"))
+        runbook = normalize(read("docs/runbooks/ORCA_WORKFLOW.md"))
+
+        for path, document in (
+            ("docs/ARCHITECTURE.md", architecture),
+            ("docs/runbooks/ORCA_WORKFLOW.md", runbook),
+        ):
+            for command in (
+                "git merge-base --is-ancestor",
+                "git rev-list --reverse",
+                "git rev-list --merges",
+            ):
+                self.assertIn(command, document, path)
+        self.assertIn(
+            "every changed path is within authorized scope and reject every "
+            "unexpected file",
+            architecture.lower(),
+        )
+        self.assertIn(
+            "checks every changed path against the authorized scope and rejects "
+            "unexpected files",
+            runbook.lower(),
+        )
+
+    def test_cherry_pick_provenance_and_empty_pick_are_explicit(self) -> None:
+        for path in (
+            "AGENTS.md",
+            ".agent/roles/execution-lead.md",
+            "docs/ARCHITECTURE.md",
+            "docs/runbooks/ORCA_WORKFLOW.md",
+            "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
+        ):
+            document = normalize(read(path))
+            self.assertIn("git cherry-pick -x", document, path)
+            self.assertIn("refs/worker-results/<worker_task_id>", document, path)
+            self.assertIn("worker_commit_sha", document, path)
+            self.assertIn("integrated_commit_sha", document, path)
+            self.assertIn("git cherry-pick --skip", document, path)
+            self.assertIn("--allow-empty", document, path)
+            self.assertIn("ALREADY_PRESENT", document, path)
+
+    def test_git_integration_escalations_use_closed_conditions(self) -> None:
+        for path in (
+            "AGENTS.md",
+            "docs/ARCHITECTURE.md",
+            "docs/runbooks/ORCA_WORKFLOW.md",
+            "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
+        ):
+            document = normalize(read(path)).lower()
+            self.assertIn("closed", document, path)
+            self.assertIn("condition 5", document, path)
+            self.assertIn("condition 6", document, path)
+            self.assertIn("root", document, path)
+            self.assertIn("redispatch", document, path)
+
+    def test_execution_packet_git_fields_have_distinct_semantics(self) -> None:
+        for path in (
+            "AGENTS.md",
+            ".agent/roles/root.md",
+            "docs/ARCHITECTURE.md",
+            "docs/runbooks/ORCA_WORKFLOW.md",
+        ):
+            document = normalize(read(path)).lower()
+            for meaning in (
+                "source ref",
+                "target branch",
+                "path boundary",
+                "integrated-state",
+                "immutable unit",
+            ):
+                self.assertIn(meaning, document, path)
 
     def test_orca_lineage_is_not_git_ancestry(self) -> None:
         statement = (

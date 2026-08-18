@@ -429,59 +429,93 @@ repo default base ref 或 sidebar parent/child 关系当作 nested writable Work
 本节是所有 writable Execution Lead → Execution Worker dispatch 的 V1 Git contract。
 它不依赖 Orca worktree lineage 推断 Git 状态。
 
-1. **Integration base。** 每个 writable Worker dispatch 都携带 immutable
-   `integration_base_sha`，其值是 dispatch 时 Execution Lead HEAD，也是 Worker 唯一被
-   授权在其上构建的 commit。Execution Packet 与 Lead → Worker assignment 还携带
-   `lead branch`、`allowed changed paths / scope`、`verification requirements` 和
-   `result mode`。
-2. **Worker base alignment。** Worker 在任何 tracked-file modification **之前**必须
-   确认 working tree clean、`integration_base_sha` 在本地存在、Worker branch HEAD 与
-   该 SHA 精确对齐，并显式比较 `git rev-parse HEAD` 与
-   `git rev-parse <integration_base_sha>^{commit}` 的输出。不得假定 Orca lineage 已经
-   完成这一步；若无法获得 declared base，Worker 必须 stop and escalate，不能用 guessed
-   base 继续。
-3. **Immutable result unit。** V1 result mode 是 ordered Git commit list。Worker
+1. **Integration base。** Root → Lead Execution Packet 的 immutable
+   `integration_base_sha` 是 Lead worktree 在任何 tracked-file edit 前必须精确匹配的
+   commit；`WORKTREE / BASE COMMIT` 只描述 placement 与用于创建它的 source ref。每个
+   writable Worker dispatch 也携带 immutable `integration_base_sha`，其值是 dispatch 时
+   Execution Lead HEAD，也是 Worker 唯一被授权在其上构建的 commit。Execution Packet
+   与 Lead → Worker assignment 还携带 `lead branch`、`allowed changed paths / scope`、
+   `verification requirements` 和 `result mode`；这些 fields 的语义见 §10。
+2. **Worker base alignment。** Execution Lead 在 dispatch 前负责 alignment：fresh
+   worktree 必须从 explicit base ref 创建；existing worktree 只有 clean 且 HEAD 已等于
+   declared base 时才可直接复用。若 HEAD 不等，Lead 只可按 runbook 的 guarded sequence
+   创建新 Worker branch；任何 base 之外的 existing commit 都必须保留并触发 redispatch
+   或 condition 6 escalation，绝不能被丢弃。Worker 是 verify-only：在任何 tracked-file
+   modification **之前**确认 clean、base local existence，并显式比较
+   `git rev-parse HEAD` 与 `git rev-parse <integration_base_sha>^{commit}`。Worker
+   不得用 `git reset --hard`、`git checkout -B` 或其他 ref-repointing command
+   自行 alignment。若 base 无法获得，或 base 已存在但 HEAD 不相等，Worker 必须 stop and
+   escalate to the Lead；Lead 不能让它在 guessed base 继续，也不能为继续而 discard
+   commits。Root → Lead writable worktree 在 Lead 首次 edit 前执行相同 equality gate。
+3. **Immutable result unit。** V1 result mode 是 ordered linear Git commit list；Worker
+   在 report 前必须确认 `integration_base_sha..worker_head_sha` 不含 merge commit。
    completion packet 返回 `integration_base_sha`、`worker_head_sha`、ordered commit
    SHA list、changed paths、verification commands and results、unresolved uncertainty。
    **No uncommitted working-tree result is accepted.**
 4. **Lead pre-integration validation。** Execution Lead 先确认自己的 working tree clean
-   且 result 声明的 `integration_base_sha` 是 expected base，再验证 Worker commits 从
-   declared base descend、ordered list 与 `git rev-list --reverse
-   <integration_base_sha>..<worker_head_sha>` 一致，检查
-   `git diff <integration_base_sha>..<worker_head_sha>` 和 changed-path list，确认所有
-   files 都在 authorized scope 内且没有 unexpected file，并保留 verification evidence。
-5. **V1 operation。** V1 integration operation is `git cherry-pick`: Execution Lead 按
-   Worker 返回的顺序把 exact commit list cherry-pick 到 Lead branch。V1 明确禁止 merge
-   Worker branch、reset Lead branch to Worker HEAD、fast-forward Lead branch，或从 Orca
-   lineage infer integration。不能用 branch takeover 或 lineage inference 替代
+   且 result 声明的 `integration_base_sha` 是 expected base，再用
+   `git merge-base --is-ancestor <integration_base_sha> <worker_head_sha>` 验证 Worker
+   ancestry；用 `git rev-list --reverse <integration_base_sha>..<worker_head_sha>` 验证
+   ordered list；并确认 `git rev-list --merges` 对该 range 无输出。Lead 检查
+   `git diff <integration_base_sha>..<worker_head_sha>` 和 changed-path list，确认 every
+   changed path is within authorized scope and reject every unexpected file，并保留
+   verification evidence。
+5. **V1 operation and provenance。** V1 integration operation is `git cherry-pick -x`。
+   Lead 先用 `git update-ref refs/worker-results/<worker_task_id> <worker_head_sha>` 在
+   Lead object database anchor immutable result，再按 returned order **逐个** cherry-pick
+   Worker commit。每次成功后记录 `worker_commit_sha → integrated_commit_sha` evidence；
+   `-x` trailer 提供 branch 内 provenance，mapping 提供 task evidence。V1 明确禁止
+   merge Worker branch、reset Lead branch to Worker HEAD、fast-forward Lead branch，或从
+   Orca lineage infer integration。不能用 branch takeover 或 lineage inference 替代
    cherry-pick。
-6. **Conflict ownership。** **The Execution Lead owns integration conflicts.** 发生
-   cherry-pick conflict 时，Worker 不得修改 Lead worktree。只有 resolution 明确落在
-   Execution Packet 内时，Lead 才可解决并记录；否则执行 `git cherry-pick --abort`，然后
-   escalate 或 redispatch。任何 resolution 后都必须重新运行 required verification。
+6. **Conflict and empty-pick ownership。** **The Execution Lead owns integration
+   conflicts.** Worker 不得修改 Lead worktree。只有 resolution 明确落在 Execution Packet
+   内时，Lead 才可解决并记录；否则执行 `git cherry-pick --abort`，然后按 condition
+   6 请求 packet amendment 或 redispatch。任何 resolution 后都必须重新运行 required
+   verification。如果 Git 报告 cherry-pick `now empty`，Lead 必须用 targeted
+   deterministic verification 证明该 Worker commit content 已存在，记录 skip reason 与
+   `worker_commit_sha → ALREADY_PRESENT@<lead_head_sha>`，再执行
+   `git cherry-pick --skip`；绝不使用 `--allow-empty`。如果无法证明 content 已存在，
+   执行 `git cherry-pick --abort` 并按 condition 5 escalate deterministic uncertainty。
 7. **Lifecycle and retention。** 顺序固定为：
 
    ```text
    Worker: implement → verify → commit → send immutable result packet → worker_done
-   Lead:   receive result → validate → integrate → verify integrated state → acknowledge
+   Lead:   receive result → anchor → validate → integrate → verify integrated state → acknowledge
    ```
 
    Worker worktree/branch must not be deleted until integration succeeds or the Execution
-   Lead explicitly rejects the result。收到 immutable commit result 后可 release
-   agent/terminal，但 Git objects 与 Worker branch 必须保持 recoverable 直到 settlement。
+   Lead explicitly rejects the result。收到 immutable result 后，Lead 必须在 agent/terminal
+   release 前创建 `refs/worker-results/<worker_task_id>` anchor。Worker branch、Git objects
+   与 anchor 必须保持 recoverable 直到 settlement。只有 mapping 与 verification evidence
+   durable、result accepted/rejected 后，Lead 才删除 local anchor 以及 local/remote
+   `worker-base/<task>`、`worker-result/<task>` temporary refs。
 8. **Parallel Workers。** Lead 独立验证每份 result 并 serialize integration。每次
    integration 后，later Worker ordered commits 都 re-cherry-pick onto the new Lead HEAD；
-   conflict 仍归 Lead。若 changed-path overlap 或 semantic interaction 使原 acceptance
-   assumption 失效，Lead escalate 或 redispatch，而不是猜测 resolution。
+   conflict 仍归 Lead。每次 cherry-pick 后都运行 integrated-state required verification；
+   没有 textual conflict 但 verification failure 时，Lead 在 packet 内 diagnose/fix，只有
+   unresolved difficult diagnosis、deterministic uncertainty 或 scope expansion 分别进入
+   condition 3、5 或 6。`semantic interaction` 只指 verification 通过但已有 evidence
+   表明一个 documented acceptance assumption 为 false；此时按 condition 2 澄清 ambiguity，
+   或按 condition 6 请求 packet amendment/redispatch，不猜测 resolution。
 9. **Remote node。** 如果 Worker 与 Lead 不共享 Git object database，先通过 explicit
-   Git ref / fetchable branch 使 `integration_base_sha` 在 remote node reachable；Worker
-   把 result commits push 到 task/worker branch 或 explicit temporary ref；Lead fetch
-   exact returned SHA(s)，执行相同 ancestry、scope、diff 和 verification checks，再
-   cherry-pick exact verified commits。**Never exchange writable project directories
-   between nodes.**
+   Git ref / fetchable branch 使 `integration_base_sha` 在 remote node reachable。remote
+   Worker worktree 在 edit 前按 runbook 的 clean/ahead-commit guard 创建 fresh branch 并
+   运行同一 equality test；发现 commits ahead of base 时拒绝 checkout/repoint，保留 refs
+   并 redispatch 或 condition 6 escalate。Worker 把 result commits push 到 task/worker
+   branch 或 explicit temporary ref；Lead fetch exact returned SHA(s)，执行相同 ancestry、
+   linearity、scope、diff 和 verification checks，再 `cherry-pick -x` exact verified
+   commits。**Never exchange writable project directories between nodes.**
 10. **Orca semantics。** Orca parent/child lineage is orchestration provenance, not proof
     of Git ancestry。每个 writable worktree 都要显式验证 Git base，nested writable
     Worker 不依赖 Orca repo default base ref。
+
+Git integration stop points 不扩展 closed Root re-entry list：base unavailable、HEAD 不能在
+不丢弃 commits 的前提下安全 alignment、conflict 超出 packet 或 remote ref/authorization
+blocked 都映射 condition 6，由 Root 提供 human gate / packet amendment，或由 Lead
+redispatch；empty-pick content 无法由 deterministic verification 证明时映射 condition 5；
+parallel interaction 按第 8 项映射 condition 2/3/5/6。Root 不接管 alignment、cherry-pick
+或 conflict-resolution implementation loop。
 
 ---
 
@@ -815,6 +849,21 @@ ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
 ```
 
+Packet fields 的语义：
+
+- `WORKTREE / BASE COMMIT`：Orca placement 与 worktree 创建所用 source ref；
+- `LEAD BRANCH`：Lead 必须在其上提交 final ordered result 的 target branch；
+- `INTEGRATION_BASE_SHA`：immutable commit object；Lead worktree 在任何 tracked edit 前
+  必须通过 `git rev-parse HEAD` equality gate；
+- `ALLOWED CHANGED PATHS / SCOPE`：可修改 path boundary 与明确 non-goals；
+- `REQUIRED TESTS / EVALS`：必须运行的 commands/suites；
+- `VERIFICATION REQUIREMENTS`：base、ancestry、scope、pre/postcondition 与 integrated-state
+  gates，不重复 tests list；
+- `VERIFICATION EVIDENCE REQUIRED`：result 中必须保留的 commands、outputs、mapping 与
+  uncertainty；
+- `RESULT MODE`：Lead 对 Root 返回的 immutable unit；V1 writable Git work 使用 ordered
+  linear Git commit list。
+
 Architecture decisions 已由 Root 决定，Execution Lead 不自动 reopen。Open questions
 delegated 明确哪些判断由 Lead 自主作出；reconnaissance strategy 说明从哪里开始查，
 而不是由 Root 代替 Lead 读取整个 repository。
@@ -838,7 +887,7 @@ ACCEPTANCE
 ```
 
 每个 writable Worker dispatch 的 `INTEGRATION_BASE_SHA` 是 dispatch 时 immutable
-Execution Lead HEAD；`RESULT MODE` 在 V1 必须是 ordered Git commit list。Worker 在
+Execution Lead HEAD；`RESULT MODE` 在 V1 必须是 ordered linear Git commit list。Worker 在
 修改 tracked file 前按 §5.4 验证 base alignment。
 
 Writable Worker 完成 commit 后返回 immutable result packet：
@@ -846,13 +895,23 @@ Writable Worker 完成 commit 后返回 immutable result packet：
 ```text
 INTEGRATION_BASE_SHA
 WORKER_HEAD_SHA
-ORDERED COMMIT SHA LIST
+ORDERED LINEAR COMMIT SHA LIST
 CHANGED PATHS
 VERIFICATION COMMANDS AND RESULTS
 UNRESOLVED UNCERTAINTY
 ```
 
 不接受 uncommitted working-tree result。
+
+Lead settlement evidence 还必须记录：
+
+```text
+WORKER RESULT ANCHOR REF
+WORKER COMMIT SHA -> INTEGRATED COMMIT SHA OR ALREADY_PRESENT@LEAD_HEAD
+CONFLICT / EMPTY-PICK RESOLUTION AND REASON
+INTEGRATED-STATE VERIFICATION COMMANDS AND RESULTS
+TEMPORARY REF CLEANUP
+```
 
 Independent Reviewer 额外获得：
 
@@ -928,14 +987,15 @@ Worker 遵循：
 
 ```text
 Worker: implement → verify → commit → send immutable result packet → worker_done
-Lead:   receive result → validate → integrate → verify integrated state → acknowledge
+Lead:   receive result → anchor → validate → integrate → verify integrated state → acknowledge
 ```
 
 Lead 按 §5.4 在 acknowledgment 前完成 base/ancestry/scope/diff validation、ordered
-cherry-pick 和 integrated-state verification。immutable commit result 已收到后可以按
-Orca lifecycle release agent/terminal；但 Worker Git objects 与 branch 仍须 recoverable，
-直到 integration 成功或 Lead 明确 reject result 后才可删除。
-
+linear `cherry-pick -x`、worker→integrated SHA mapping 与 integrated-state
+verification。immutable result 已收到后可以按 Orca lifecycle release agent/terminal，
+但 release 前须创建 Lead-owned anchor；Worker Git objects、branch 与 anchor 保持
+recoverable，直到 integration 成功或 Lead 明确 reject result。只有 SHA mapping 与
+verification evidence durable 后才清理 temporary refs。
 
 Execution Lead 在 acceptance 满足或 definitive blocker 前保持 edit/verify/fix loop，
 并按 active preamble 只发送一次 `worker_done`。Root 收到的是 compressed evidence，
