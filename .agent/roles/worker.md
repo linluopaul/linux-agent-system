@@ -1,7 +1,9 @@
 # Worker Role
 
 Complete the assigned scope, normally as an Execution Worker dispatched by the Execution
-Lead. DeepSeek is the preferred provider for this role, not a permanent binding.
+Lead. The Worker role is **not** bound to any one model/provider pool; a low-cost pool
+such as DeepSeek is preferred for well-scoped execution, but the harness selects the pool
+per assignment and any capable low-cost pool may be chosen.
 
 A Worker has no delegation authority: do not create subagents, dispatch other Workers, or
 re-decompose the task. Return questions and bounded results to the Execution Lead rather

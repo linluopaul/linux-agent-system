@@ -585,9 +585,14 @@ anti-pattern。
 
 ### 6.2 Execution Lead
 
-Execution Lead 是 first-class Engineering Control Plane，默认 provider 偏好为 Codex，
-但不是永久绑定。Root 保留 outcome ownership；Execution Lead 在 supervised Orca
-Dispatch 和 Execution Packet 边界内获得 delegated execution authority。
+Execution Lead 是 first-class Engineering Control Plane。Root 按 task 选择 Execution
+Lead harness class 并写入 Execution Packet：默认 **Pi Standard/Fast Lead** 适用于
+well-scoped、lower-complexity、LOW/MEDIUM 工作；**Codex Premium Lead** 是 escalation，
+适用于 difficult engineering reasoning、complex repository investigation、difficult
+debugging、HIGH-risk 或 cross-module implementation，以及 cheaper execution 证明不足时。
+没有任何 harness 或 model/provider pool 是永久 role binding；Pi 是 harness，模型是
+runtime 选的，不是固定模型。Root 保留 outcome ownership；Execution Lead 在 supervised
+Orca Dispatch 和 Execution Packet 边界内获得 delegated execution authority。
 
 Execution Lead 负责：
 
@@ -627,8 +632,9 @@ question 由 Lead 处理，所有 sub-dispatch 在 parent `worker_done` 前 sett
 
 ### 6.3 Worker
 
-Execution Worker 通常由 Execution Lead dispatch，默认 provider 偏好为 DeepSeek。
-Worker 完成明确定义的 scope：
+Execution Worker 通常由 Execution Lead dispatch。Worker role 不绑定任何 model/provider
+pool；低成本的 pool（例如 DeepSeek、MiniMax、Kimi）preferred for well-scoped work，实际
+选哪个 pool 由 harness 按 assignment 决定。Worker 完成明确定义的 scope：
 
 - implementation；
 - search；
@@ -680,57 +686,77 @@ Platform Steward 不成为每个 Root 的审批层，也不能自行放宽 human
 
 ### 6.6 不使用固定组织图
 
-推荐：
+推荐（harness 选择是 Runtime 决策，不是永久绑定）：
 
 ```text
              Root / Cognitive Control Plane
-                    (Claude preferred)
+                 (pi harness / capable pool)
                           │
-                   Execution Packet
+                   Execution Packet（EXECUTION HARNESS）
                           │
              Execution Lead / Engineering
-                     (Codex preferred)
+            Pi Standard/Fast 默认 → Codex Premium escalation
                 ┌─────────┼─────────┐
                 │         │         │
             self-do   subagents   Worker
-                                  (DeepSeek preferred)
+                                  (low-cost pool, e.g. deepseek)
                 └──── tests / evals / fixes ────┘
                           │
               fresh context-independent review
 ```
 
-Provider preference 可以被 availability、capability、budget、independence 或 task
-evidence 覆盖。
+Harness class、model/provider pool 与 capability profile 都是 runtime 选的，可以被
+availability、capability、budget、independence 或 task evidence 覆盖。只有 ROLE 是
+invariant。Pi 是 harness，其模型 runtime 选中，不是固定模型。此抽象保留了未来
+long-lived Pi Supervisor（Orca observation/control、Git/GitHub、system inspection、
+SSH、Tailscale、approval gates）的空间，但没有在此实现。
 
 ---
 
-## 7. Provider and Cost Policy
+## 7. Harness, Model Pool and Cost Policy
 
 基本原则：
 
-> 使用能够可靠完成当前工作、满足 independence 和 risk 要求的最低成本资源。
+> 使用能够可靠完成当前工作、满足 independence 和 risk 要求的最低成本资源。优先使用
+deterministic 工具、脚本、tests 与 evals 而不是 model calls。不要在 agent-to-agent
+report 中叙述 routine tool usage。
 
-默认偏好：
+路由是 `role -> harness class -> model/provider pool`。.agent/harnesses/ 保存 harness
+profiles（pi、claude-code、codex-cli）；.agent/providers/ 被 reframe 为 model/provider
+pool profiles；routing.yaml 在 7.1 路由 role 到 harness，再由 harness 选择 model pool。
+DeepSeek、MiniMax、Kimi、Gemini 与未来 provider 都是可选择的 pool，不是永久 role。
+Pi 是 harness，模型 runtime 选中（例如 host 默认 pool `volcengine-ark-coding-plan` 的
+request alias `ark-code-latest` 可能路由到不同的底层模型，fallback pool 为
+deepseek），因此 Pi 永远不是固定模型。Pi 在 Orca 下通过 `orca orchestration
+worker-start` 启动，harness 选择从不绕过 worker-start。
 
-| Work | Preferred provider | Notes |
+默认偏好（harness / pool，不是 role binding）：
+
+| Work | Preferred harness / pool | Notes |
 |---|---|---|
-| Root / Cognitive Control Plane | Claude | problem definition 与 judgment |
-| Execution Lead / Engineering Control Plane | Codex | autonomous engineering delivery |
-| Well-scoped implementation/search/test/mechanical refactor | DeepSeek | preferred Execution Worker |
-| Independent review | Claude, then Codex | fresh context-isolated session |
-| HIGH-risk review | provider different from implementer | 无 alternative 时需 human-visible waiver |
-| Fallback | any capable provider | 由 capability/availability/budget/evidence 决定 |
+| Root / Cognitive Control Plane | pi harness + capable pool | problem definition 与 judgment |
+| Execution Lead Standard/Fast | pi harness + low-cost pool | well-scoped LOW/MEDIUM work 默认（Root 决定） |
+| Execution Lead Premium | codex-cli harness + codex pool | difficult engineering / HIGH-risk escalation |
+| Well-scoped implementation/search/test/mechanical refactor | low-cost pool (e.g. deepseek) | preferred Execution Worker；不绑定 pool |
+| Independent review | fresh context-isolated session | capable pool preferred，然后另一 capable pool |
+| HIGH-risk review | pool different from implementer | 无 alternative 时需 human-visible waiver |
+| Fallback | any capable pool | 由 capability/availability/budget/evidence 决定 |
 
-路由顺序写入 `.agent/policies/routing.yaml`，风险触发写入
-`.agent/policies/risk.yaml`。`risk.yaml` 对 independent review 和 human gate
-是否 required 具有 authority；`routing.yaml` 只在 requirement 已知后选择 provider，
-risk-level role key 覆盖同名 default，缺省时继承 default。Controller 记录近似
-provider pressure，不依赖不稳定的精确额度 API。
+路由与 risk 写入 `.agent/policies/routing.yaml` 与 `.agent/policies/risk.yaml`。
+`risk.yaml` 对 independent review 和 human gate 是否 required 具有 authority；
+`routing.yaml` 只在 requirement 已知后选择 harness 与 model pool，risk-level role key
+覆盖同名 default，缺省时继承 default。efficiency 与 terse reporting 规则在
+`.agent/policies/efficiency.yaml`，capability 与 least-capability/progressive-disclosure
+规则在 `.agent/policies/capabilities.yaml`。Controller 记录近似 cost pressure，不依赖
+不稳定的精确额度 API。
 
-正常 operation 的 role-first 目标是 execution usage 显著高于 Root usage；在当前
-provider preferences 下，通常体现为 Codex execution usage 高于 Claude Root usage。
-以下 workflow rules 用于产生这种 asymmetry；V0 不声称 automatic enforcement，而在
-usage 被收集后由 `root_vs_execution_usage_share` 验证：
+正常 operation 的 role-first 目标是 execution volume 显著高于 Root reasoning volume，
+且 low-cost execution volume 高于 premium execution volume；效果用 execution-cost
+metrics（`execution_vs_root_usage_share`、`premium_vs_low_cost_execution_share`、
+`context_and_output_cost_per_successful_task`）验证，`execution_vs_root_usage_share`
+lineage 自 `root_vs_execution_usage_share`，保持 ADR-002 的 computation（见 §15 与
+ADR-004）。不再以 “Codex usage > Claude usage” 作为目标。以下 workflow rules 用于产生
+这种 asymmetry；V0 不声称 automatic enforcement：
 
 1. Root reconnaissance 有界，只读取正确制定 Execution Packet 所需内容；为了写 packet
    而阅读整个 codebase 是 anti-pattern。
@@ -746,14 +772,54 @@ usage 被收集后由 `root_vs_execution_usage_share` 验证：
 
 至少记录：
 
-- task / role / provider；
+- task / role / harness / model pool / capability profile；
 - duration；
 - retries；
 - approximate context / complexity；
 - quota / rate-limit failure；
 - review yield；
 - verification outcome；
-- root_vs_execution_usage_share。
+- execution_vs_root_usage_share、premium_vs_low_cost_execution_share、
+  context_and_output_cost_per_successful_task。
+
+---
+
+### 7.1 role → harness → model pool 路由
+
+`routing.yaml` 的 `defaults.preferred_harness` 把每个 role 映射到默认 harness class；
+`harnesses` 段定义每个 harness 的 default pool 与 fallback pool；`model_pools` 段列出可
+选择的 pool。risk-level key 覆盖 default。这保证没有 provider 被永久绑定到 role：同样
+的 role 可以用 pi、claude-code 或 codex-cli，同样的 harness 可以用不同 pool。Pi 的模型
+是 runtime 选的，不在 harness 层面固定。
+
+### 7.2 Execution Lead harness class
+
+Root 按 task 选择 Execution Lead harness class（AC3）：
+
+- **Pi Standard/Fast Lead**：well-scoped、lower-complexity、LOW/MEDIUM work 的默认。
+- **Codex Premium Lead**：difficult engineering reasoning、complex repository
+  investigation、difficult debugging、HIGH-risk 或 cross-module implementation，以及在
+  cheaper execution 证明不足时作为 escalation。
+
+选择写入 Execution Packet 的 EXECUTION HARNESS 字段。同 root.md / execution-lead.md /
+ADR-004 保持一致。
+
+### 7.3 efficiency 与 terse reporting
+
+`.agent/policies/efficiency.yaml` 记录 10 条 efficiency principles（含
+never narrate routine tool usage）。Agent-to-agent report 使用 terse block
+`STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT`。Clarity override：terse
+不适用于 architecture decisions、acceptance criteria、security warnings、destructive
+operations、human approval requests、unresolved ambiguity、HIGH-risk findings；human-facing
+Supervisor/Root 沟通保持 concise 但 normal prose。Efficiency targets 是 objective，不是
+quota，不能削弱 acceptance criteria、HIGH-risk safeguards、independence 或 human gates。
+
+### 7.4 capability profile
+
+`.agent/policies/capabilities.yaml` 定义命名 profile 与 least-capability /
+progressive-disclosure 规则；assignment 只声明 task-relevant capability。此抽象保留未
+来 long-lived Pi Supervisor 的空间（Orca observation/control、Git/GitHub、system
+inspection、SSH、Tailscale、approval gates），但没有实现。
 
 ---
 
@@ -884,6 +950,16 @@ INTEGRATION_BASE_SHA
 ALLOWED CHANGED PATHS / SCOPE
 VERIFICATION REQUIREMENTS
 RESULT MODE
+EXECUTION HARNESS
+MODEL POLICY
+CAPABILITY PROFILE
+EFFICIENCY PROFILE
+CONTEXT BUDGET
+OUTPUT MODE
+SESSION POLICY
+COMPACTION POLICY
+EXECUTION / RETRY BUDGET
+ESCALATION THRESHOLD
 BUDGET / HUMAN GATES
 ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
@@ -904,6 +980,24 @@ Packet fields 的语义：
 - `RESULT MODE`：Lead 对 Root 返回的 immutable unit；V1 writable Git work 使用 ordered
   linear Git commit list。
 
+新增字段选择 Lead 的 harness 与模型策略、能力与效率边界：
+
+- `EXECUTION HARNESS`：Root 选择的 Execution Lead harness class（默认 Pi Standard/Fast，
+  困难工作用 Codex Premium）；默认选择写入 `.agent/harnesses/` 与 `routing.yaml`；
+- `MODEL POLICY`：首次成本、模型池 与 fallback pool（见 `routing.yaml` `model_pools`），
+  并允许在 deterministic 证据证明不足时升级；Pi 的模型是 runtime 选的，不是固定模型；
+- `CAPABILITY PROFILE`：只声明 task 需要的 capability，遵循 least capability 与
+  progressive disclosure（`.agent/policies/capabilities.yaml`）；
+- `EFFICIENCY PROFILE`：`standard-low-cost` 等，执行效率与 terse reporting 规则
+  （`.agent/policies/efficiency.yaml`）；
+- `CONTEXT BUDGET`：context 使用上限与 targeted read 策略；
+- `OUTPUT MODE`：`RESULT MODE` 之外的输出形式（interactive terminal、artifact 等）；
+- `SESSION POLICY`：session 的有界性与 durable 知识归属；
+- `COMPACTION POLICY`：Pi 可自动 compact；compact 后必须重读本 packet 的
+  INTEGRATION_BASE_SHA / LEAD BRANCH / ALLOWED CHANGED PATHS 再继续；
+- `EXECUTION / RETRY BUDGET`：dispatch 内的 verification-fix cycle 上限；
+- `ESCALATION THRESHOLD`：何时升级回 Root（closed conditions），不得扩展 closed list。
+
 Architecture decisions 已由 Root 决定，Execution Lead 不自动 reopen。Open questions
 delegated 明确哪些判断由 Lead 自主作出；reconnaissance strategy 说明从哪里开始查，
 而不是由 Root 代替 Lead 读取整个 repository。
@@ -922,6 +1016,12 @@ ALLOWED CHANGED PATHS / SCOPE
 CONSTRAINTS
 VERIFICATION REQUIREMENTS
 RESULT MODE
+EXECUTION HARNESS (REDUCED)
+MODEL POLICY (REDUCED)
+CAPABILITY PROFILE
+EFFICIENCY PROFILE
+OUTPUT MODE
+EXECUTION / RETRY BUDGET
 EXPECTED OUTPUT
 ACCEPTANCE
 ```
@@ -1249,8 +1349,11 @@ Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth
 - retry / escalation；
 - review yield；
 - mean task latency；
-- provider pressure；
-- root_vs_execution_usage_share；
+- bottleneck / cost per outcome；
+- provider pressure（per-pool approximate cost）；
+- execution_vs_root_usage_share；
+- premium_vs_low_cost_execution_share；
+- context_and_output_cost_per_successful_task；
 - CI / eval failure；
 - blocked age；
 - node utilization；
@@ -1259,7 +1362,8 @@ Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth
 - human-gate wait；
 - backup/recovery checks。
 
-`root_vs_execution_usage_share` 是每个 completed task 的 two-component percentage：
+`execution_vs_root_usage_share` lineage 自 `root_vs_execution_usage_share`，保留
+ADR-002 的 computation，是每个 completed task 的 two-component percentage：
 
 - `root_usage_units`：Root session 的 provider-reported approximate input + output
   tokens；不含 Reviewer；
@@ -1270,14 +1374,33 @@ Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth
   `root_share = 100 * root_usage_units / denominator`，
   `execution_share = 100 * execution_usage_units / denominator`。
 
-如果 provider 没有可审计的 token estimate，值标为 `unknown`，不得用猜测制造 ratio。
-V0 由 Root 在 task settlement 时从 provider / harness receipts 手工记录到
+如果 pool 没有可审计的 token estimate，值标为 `unknown`，不得用猜测制造 ratio。
+V0 由 Root 在 task settlement 时从 harness receipts 手工记录到
 `.agent/runs/<task>/metrics.yaml`，状态为 **manually recorded, not yet automated**；
 Platform Steward 验证 per-task record，并聚合最近 20 个有值的 completed tasks。Rolling
 window 的 `execution_share >= 65%` 是当前 drift target；低于 threshold 触发对 packet
 scope、Root reconnaissance、polling frequency 和 implementation-loop ownership 的
-检查。当前 provider preferences 通常使 execution 体现为 Codex、Root 体现为 Claude，
-但 metric invariant 始终按 role 计算。
+检查。metric invariant 始终按 role 计算，不依赖具体 harness 或 pool。
+
+`premium_vs_low_cost_execution_share` 衡量 execution 内部低成本与 premium 的构成：
+
+- `premium_execution_units`：premium harness / pool（例如 Codex Premium Lead、Claude
+  高能力工作）的 execution token unit；
+- `low_cost_execution_units`：低成本和标准 harness / pool（例如 pi Standard/Fast、
+  deepseek 池）的 execution token unit；
+- `premium_share = 100 * premium_execution_units / (premium_execution_units +
+  low_cost_execution_units)`。
+
+目标原则是 execution volume > root reasoning volume，且 low-cost execution volume >
+premium execution volume，而不是 “Codex usage > Claude usage”。
+
+`context_and_output_cost_per_successful_task` 记录每个 successful completed task 的
+approximate context + output cost，用于防止上下文和输出成本随一轮一轮 escalation
+失控。
+
+以上 metrics 的价值在于发现 high-value reasoning 挤占了低成本执行，或 Root reasoning
+与 execution 的比例失衡；它们不能用来绕过 acceptance criteria、HIGH-risk safeguards 或
+human gates。
 
 反复 failure 应优先晋升为：
 

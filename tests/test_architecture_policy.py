@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import re
 import unittest
 
@@ -146,38 +147,56 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 self.fail(f"{path.relative_to(ROOT)} is not valid YAML: {error}")
 
         routing = parsed["routing.yaml"]
+        harnesses = routing["harnesses"]
+        for harness in ("pi", "claude_code", "codex_cli"):
+            self.assertIn(harness, harnesses)
+        # pi is a harness, not a model pool
+        self.assertNotIn("pi", routing["model_pools"])
+        for pool in (
+            "claude",
+            "codex",
+            "deepseek",
+            "volcengine_ark_coding_plan",
+            "min_max",
+            "kimi",
+            "gemini",
+        ):
+            self.assertIn(pool, routing["model_pools"])
+
         defaults = routing["defaults"]
-        self.assertEqual("claude", defaults["preferred_root"][0])
-        self.assertEqual("codex", defaults["preferred_execution_lead"][0])
-        self.assertEqual("deepseek", defaults["preferred_worker"][0])
-        self.assertEqual("claude", defaults["preferred_specialist"][0])
-        self.assertEqual("claude", defaults["preferred_reviewer"][0])
+        self.assertEqual("pi", defaults["preferred_harness"]["root"])
+        self.assertEqual("pi", defaults["preferred_harness"]["execution_lead"])
+        self.assertEqual("pi", defaults["execution_lead"]["standard_harness"])
+        self.assertEqual(
+            "codex_cli", defaults["execution_lead"]["premium_escalation_harness"]
+        )
 
-        first_choices = {
-            "preferred_root": "claude",
-            "preferred_execution_lead": "codex",
-            "preferred_worker": "deepseek",
-        }
-        for risk_name, risk_policy in routing["risk"].items():
-            for role_key, provider in first_choices.items():
-                if role_key in risk_policy:
-                    self.assertEqual(
-                        provider,
-                        risk_policy[role_key][0],
-                        f"risk.{risk_name}.{role_key}",
-                    )
-
+        # The Execution Lead defaults to Pi (Standard/Fast); Codex is the premium
+        # escalation and appears only for high-risk/difficult routing, never as a
+        # per-role provider binding.
+        self.assertEqual("pi", routing["risk"]["low"]["preferred_harness"]["execution_lead"])
+        self.assertEqual(
+            "pi", routing["risk"]["medium"]["preferred_harness"]["execution_lead"]
+        )
+        self.assertEqual(
+            "codex_cli", routing["risk"]["high"]["preferred_harness"]["execution_lead"]
+        )
         self.assertEqual(
             "cross_provider_or_human_visible_residual_risk_waiver",
             routing["risk"]["high"]["reviewer_provider_diversity"],
         )
+        self.assertEqual("required", routing["risk"]["high"]["independent_review"])
+        self.assertNotIn("preferred_worker", routing)
+        self.assertNotIn("preferred_root", routing)
+        self.assertNotIn("preferred_execution_lead", routing)
+
         principles = routing["principles"]
         for principle in (
-            "claude_is_default_root_preference",
-            "codex_is_default_execution_lead_preference",
-            "deepseek_is_preferred_for_well_scoped_worker_tasks",
+            "route_by_role_then_harness_then_model_pool",
+            "root_selects_the_execution_lead_harness_class",
+            "pi_is_the_default_execution_lead_harness_for_well_scoped_low_medium_work",
+            "codex_is_a_premium_execution_lead_escalation_not_a_mandatory_binding",
             "root_reentry_is_limited_to_the_closed_escalation_list",
-            "normal_execution_usage_substantially_exceeds_root_usage",
             "do_not_permanently_bind_provider_to_role",
         ):
             self.assertIn(principle, principles)
@@ -185,8 +204,22 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
             principles,
         )
+        self.assertNotIn(
+            "codex_is_default_root_preference",
+            principles,
+        )
+        self.assertNotIn(
+            "codex_is_default_execution_lead_preference",
+            principles,
+        )
+        self.assertNotIn(
+            "deepseek_is_preferred_for_well_scoped_worker_tasks",
+            principles,
+        )
         self.assertIn("levels", parsed["risk.yaml"])
         self.assertIn("execution_lead_failure", parsed["retry.yaml"])
+        self.assertIn("catalog", parsed["capabilities.yaml"])
+        self.assertIn("principles", parsed["efficiency.yaml"])
 
     def test_execution_lead_role_and_closed_escalation_contract(self) -> None:
         lead = read(".agent/roles/execution-lead.md")
@@ -265,6 +298,16 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 "ALLOWED CHANGED PATHS / SCOPE",
                 "VERIFICATION REQUIREMENTS",
                 "RESULT MODE",
+                "EXECUTION HARNESS",
+                "MODEL POLICY",
+                "CAPABILITY PROFILE",
+                "EFFICIENCY PROFILE",
+                "CONTEXT BUDGET",
+                "OUTPUT MODE",
+                "SESSION POLICY",
+                "COMPACTION POLICY",
+                "EXECUTION / RETRY BUDGET",
+                "ESCALATION THRESHOLD",
                 "BUDGET / HUMAN GATES",
                 "ESCALATION CONTRACT",
                 "EXPECTED REPORT FORMAT",
@@ -415,6 +458,17 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("supersedes **only** ADR-001's provider-role preferences", adr)
         self.assertIn("Orca the primary ADE/worktree/collaboration/orchestration", adr)
         self.assertIn("Herdr remains optional future infrastructure", adr)
+
+        # v2.1: execution-cost metrics supersede the provider-usage objective while
+        # keeping the ADR-002 computation and lineage.
+        for metric in (
+            "execution_vs_root_usage_share",
+            "premium_vs_low_cost_execution_share",
+            "context_and_output_cost_per_successful_task",
+        ):
+            self.assertIn(metric, architecture)
+        self.assertIn("root_vs_execution_usage_share", architecture)
+        self.assertIn("lineage", architecture)
 
     def test_high_risk_review_guardrail_is_preserved(self) -> None:
         risk = read(".agent/policies/risk.yaml")
@@ -858,6 +912,268 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "will not implement a parallel worktree/terminal/message/dispatch scheduler",
             adr,
         )
+
+
+    def test_pi_is_modeled_as_harness_not_model_or_provider(self) -> None:
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertIn("pi", routing["harnesses"])
+        self.assertNotIn("pi", routing["model_pools"])
+        pi_harness = read(".agent/harnesses/pi.md")
+        lower = pi_harness.lower()
+        self.assertIn("harness", lower)
+        self.assertIn("runtime", lower)
+        self.assertIn("model/provider pool", lower)
+        self.assertNotIn("pi is a fixed model", lower)
+        self.assertIn("worker-start", pi_harness)
+
+    def test_worker_role_is_not_bound_to_deepseek(self) -> None:
+        worker = read(".agent/roles/worker.md")
+        self.assertIn("bound to any one model/provider pool", worker)
+        self.assertIn("not", worker.split("bound to any one")[0])
+        deepseek = read(".agent/providers/deepseek.md")
+        self.assertIn("Worker *role* is not bound to DeepSeek", deepseek)
+        self.assertIn("not a role and not a permanent binding", deepseek)
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertIn("deepseek", routing["model_pools"])
+        self.assertNotIn("preferred_worker", routing)
+        self.assertNotIn(
+            "deepseek_is_preferred_for_well_scoped_worker_tasks",
+            routing["principles"],
+        )
+
+    def test_codex_is_premium_escalation_not_mandatory_lead(self) -> None:
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertEqual(
+            "pi", routing["defaults"]["execution_lead"]["standard_harness"]
+        )
+        self.assertEqual(
+            "codex_cli",
+            routing["defaults"]["execution_lead"]["premium_escalation_harness"],
+        )
+        self.assertNotIn(
+            "codex_is_default_execution_lead_preference",
+            routing["principles"],
+        )
+        lead = normalize(read(".agent/roles/execution-lead.md"))
+        self.assertIn("Pi Standard/Fast Lead", lead)
+        self.assertIn("Codex Premium Lead", lead)
+        self.assertIn("permanent binding", lead)
+        codex_cli = normalize(read(".agent/harnesses/codex-cli.md"))
+        self.assertIn("It is **not** the mandatory Execution Lead for every task", codex_cli)
+        self.assertIn("Premium Execution Lead", codex_cli)
+        adr = normalize(read("docs/decisions/ADR-004-role-harness-model-capability-separation.md"))
+        self.assertIn("Pi Standard/Fast Lead", adr)
+        self.assertIn("Codex Premium Lead", adr)
+
+    def test_root_selects_execution_lead_harness(self) -> None:
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertIn(
+            "root_selects_the_execution_lead_harness_class", routing["principles"]
+        )
+        root = normalize(read(".agent/roles/root.md"))
+        self.assertIn("Select the Execution Lead harness class per task", root)
+        agents = read("AGENTS.md")
+        self.assertIn("execution lead harness", normalize(agents).lower())
+        self.assertIn("EXECUTION HARNESS", agents)
+        self.assertIn("EXECUTION HARNESS", read("docs/ARCHITECTURE.md"))
+
+    def test_capability_profile_catalog_exists_and_is_referenced(self) -> None:
+        caps = self.load_yaml(".agent/policies/capabilities.yaml")
+        catalog = caps["catalog"]
+        for capability in (
+            "repo",
+            "git",
+            "python-test",
+            "orca-cli",
+            "orchestration",
+            "worker-integration",
+            "github",
+            "system-inspection",
+            "ssh",
+            "tailscale",
+            "quantitative-analysis",
+        ):
+            self.assertIn(capability, catalog)
+        self.assertIn("least_capability", caps)
+        self.assertIn("progressive_disclosure", caps)
+        self.assertIn("profiles", caps)
+        agents = read("AGENTS.md")
+        self.assertIn(".agent/policies/capabilities.yaml", agents)
+        self.assertIn("CAPABILITY PROFILE", agents)
+        self.assertIn("CAPABILITY PROFILE", read("docs/ARCHITECTURE.md"))
+
+    def test_execution_packet_declares_harness_model_capability_efficiency_fields(
+        self,
+    ) -> None:
+        agents = read("AGENTS.md")
+        architecture = read("docs/ARCHITECTURE.md")
+        for field in (
+            "EXECUTION HARNESS",
+            "MODEL POLICY",
+            "CAPABILITY PROFILE",
+            "EFFICIENCY PROFILE",
+            "CONTEXT BUDGET",
+            "OUTPUT MODE",
+            "SESSION POLICY",
+            "COMPACTION POLICY",
+            "EXECUTION / RETRY BUDGET",
+            "ESCALATION THRESHOLD",
+        ):
+            self.assertIn(field, agents)
+            self.assertIn(field, architecture)
+
+    def test_efficiency_policy_principles_exist(self) -> None:
+        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+        principles = efficiency["principles"]
+        self.assertGreaterEqual(len(principles), 10)
+        for principle in (
+            "use_the_cheapest_capable_resource",
+            "prefer_deterministic_tools_tests_and_evals_before_model_calls",
+            "never_narrate_routine_tool_usage",
+            "use_terse_structured_agent_to_agent_reporting",
+        ):
+            self.assertIn(principle, principles)
+
+    def test_terse_reporting_principle_and_clarity_exceptions(self) -> None:
+        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+        self.assertEqual(
+            "STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT",
+            efficiency["report_block"]["header"],
+        )
+        overrides = efficiency["clarity_overrides"]
+        for item in (
+            "architecture_decisions",
+            "acceptance_criteria",
+            "security_warnings",
+            "destructive_operations",
+            "human_approval_requests",
+            "unresolved_ambiguity",
+            "high_risk_findings",
+        ):
+            self.assertIn(item, overrides)
+        agents = read("AGENTS.md")
+        self.assertIn("STATUS / CHANGED / VERIFY / COMMIT / BLOCKERS /", agents)
+        self.assertIn("never narrate routine tool usage", agents)
+        self.assertIn("clarity", read("docs/ARCHITECTURE.md").lower())
+
+    def test_caveman_is_not_a_dependency(self) -> None:
+        # Caveman must not be a declared dependency in any manifest / requirements /
+        # lockfile / install instruction that exists in this repository.
+        manifest_names = (
+            "requirements.txt",
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "Pipfile",
+            "Pipfile.lock",
+            "package.json",
+            "package-lock.json",
+        )
+        for name in manifest_names:
+            path = ROOT / name
+            if path.exists():
+                self.assertNotIn(
+                    "caveman", path.read_text(encoding="utf-8").lower(), name
+                )
+
+        # Not a routing requirement.
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertNotIn("caveman", json.dumps(routing).lower())
+
+        # Not an execution-policy requirement nor a role/harness profile requirement.
+        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+        self.assertNotIn("caveman", json.dumps(efficiency).lower())
+        for directory in (ROOT / ".agent" / "roles", ROOT / ".agent" / "harnesses"):
+            if directory.exists():
+                for path in directory.rglob("*"):
+                    if path.is_file():
+                        self.assertNotIn(
+                            "caveman",
+                            path.read_text(encoding="utf-8").lower(),
+                            str(path.relative_to(ROOT)),
+                        )
+
+        # Not a required or installed Skill or Extension. (No skill/extension shorthand
+        # is present in the repo's .agent/skills; nothing installs Caveman.)
+        skills_dir = ROOT / ".agent" / "skills"
+        if skills_dir.exists():
+            for path in skills_dir.rglob("*"):
+                if path.is_file():
+                    self.assertNotIn(
+                        "caveman",
+                        path.read_text(encoding="utf-8").lower(),
+                        str(path.relative_to(ROOT)),
+                    )
+
+        # Terse reporting is a native principle that stands alone without Caveman.
+        self.assertIn(
+            "use_terse_structured_agent_to_agent_reporting",
+            efficiency["principles"],
+        )
+
+    def test_execution_cost_metrics_replace_provider_usage_objective(self) -> None:
+        architecture = read("docs/ARCHITECTURE.md")
+        steward = read(".agent/roles/platform-steward.md")
+        adr = read("docs/decisions/ADR-004-role-harness-model-capability-separation.md")
+        for metric in (
+            "execution_vs_root_usage_share",
+            "premium_vs_low_cost_execution_share",
+            "context_and_output_cost_per_successful_task",
+        ):
+            self.assertIn(metric, architecture)
+            self.assertIn(metric, steward)
+            self.assertIn(metric, adr)
+        # The retired objective is referenced as retired, not as current policy.
+        self.assertIn("Codex usage > Claude usage", architecture)
+        self.assertIn("Codex usage greater than Claude usage", adr)
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertNotIn(
+            "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
+            routing["principles"],
+        )
+        self.assertNotIn(
+            "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
+            adr,
+        )
+
+    def test_efficiency_policy_does_not_weaken_high_risk_guardrails(self) -> None:
+        efficiency = read(".agent/policies/efficiency.yaml")
+        self.assertIn("NOT weaken the HIGH-risk", efficiency)
+        self.assertIn("risk.yaml", efficiency)
+        self.assertIn("human-gate", efficiency)
+        risk = read(".agent/policies/risk.yaml")
+        self.assertIn("independent_review: required", risk)
+        self.assertIn("controller_security_and_safety_policy", risk)
+        routing = read(".agent/policies/routing.yaml")
+        self.assertIn(
+            "reviewer_provider_diversity: "
+            "cross_provider_or_human_visible_residual_risk_waiver",
+            routing,
+        )
+
+    def test_validated_lifecycle_invariants_survive_v21(self) -> None:
+        for path in WRITABLE_WORKER_LIFECYCLE_DOCUMENTS:
+            document = normalize(read(path))
+            self.assertIn(normalize(WORKER_START_REQUIREMENT), document, path)
+            self.assertIn(normalize(EXPLICIT_BASE_REQUIREMENT), document, path)
+            self.assertIn(normalize(LOW_LEVEL_LAUNCH_PROHIBITION), document, path)
+            self.assertIn(normalize(WORKER_RELEASE_REQUIREMENT), document, path)
+            self.assertIn(normalize(RELEASE_BEFORE_ACK_REASON), document, path)
+            self.assertIn("git cherry-pick -x", document, path)
+            self.assertIn("integration_base_sha", document, path)
+            self.assertIn("git rev-parse HEAD", document, path)
+        for path in SUPERVISED_ROOT_TO_LEAD_DOCUMENTS:
+            self.assertIn(
+                normalize(ROOT_TO_LEAD_WORKER_START_REQUIREMENT),
+                normalize(read(path)),
+                path,
+            )
+        for path in ("AGENTS.md", ".agent/roles/execution-lead.md",
+                     "docs/ARCHITECTURE.md"):
+            document = normalize(read(path)).lower()
+            self.assertIn("closed", document, path)
+            self.assertIn("condition 6", document, path)
+            self.assertIn("re-entry", document, path)
 
 
 if __name__ == "__main__":

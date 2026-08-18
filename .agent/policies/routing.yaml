@@ -1,116 +1,101 @@
-# Model routing preferences.
-# These are preferences, not permanent provider-role bindings.
-# Capability, availability, risk evidence and budget may justify fallback.
+# Routing preferences for harness classes and model/provider pools.
+# These are preferences, not permanent bindings. routing.yaml routes
+#   ROLE -> HARNESS CLASS -> MODEL / PROVIDER POOL
+# so no harness, model or provider pool is permanently bound to a role, and Pi is a
+# harness with a runtime-selected model, never a fixed model.
 #
 # risk.yaml is authoritative for whether independent review or a human gate is required.
-# This file chooses providers after those requirements are known. A risk-level preference
-# overrides the same default role key; omitted keys inherit from defaults.
+# This file selects the harness class and model/provider pool after those requirements are
+# known. A risk-level preference overrides the same default role key; omitted keys inherit
+# from defaults.
 
+# Harness classes defined under .agent/harnesses/.
+harnesses:
+  pi:
+    description: fast, low-cost standard harness; the default Execution Lead for well-scoped LOW/MEDIUM work
+    default_pool: volcengine_ark_coding_plan
+    fallback_pool: deepseek
+  claude_code:
+    description: premium harness for high-capability reasoning and independent review
+    preferred_pool: claude
+  codex_cli:
+    description: Codex Premium Execution Lead for difficult engineering
+    preferred_pool: codex
+
+# Model / provider pools and billing pools. These are selectable pools, not permanent
+# roles. DeepSeek, MiniMax, Kimi, Gemini and future providers are modeled here.
+model_pools:
+  - claude
+  - codex
+  - deepseek
+  - volcengine_ark_coding_plan
+  - min_max
+  - kimi
+  - gemini
+
+# Role -> default harness class preferences. The Root selects the Execution Lead harness
+# per task; Pi Standard/Fast is the default and Codex is the premium escalation.
 defaults:
-  preferred_root:
-    - claude
-    - codex
-    - deepseek
-  preferred_execution_lead:
-    - codex
-    - deepseek
-    - claude
-  preferred_worker:
-    - deepseek
-    - codex
-    - claude
-  preferred_specialist:
-    - claude
-    - codex
-  preferred_reviewer:
-    - claude
-    - codex
+  preferred_harness:
+    root: pi
+    execution_lead: pi
+    specialist: pi
+    reviewer: pi
+    worker: pi
+  execution_lead:
+    standard_harness: pi
+    premium_escalation_harness: codex_cli
 
 work_preferences:
   architecture_consultation:
-    - claude
-    - codex
+    preferred_harness: claude_code
+    preferred_pool: claude
   difficult_diagnosis:
-    - claude
-    - codex
+    premium_harness: codex_cli
   ambiguity_resolution:
-    - claude
-    - codex
+    preferred_harness: claude_code
   independent_high_risk_review:
-    - claude
-    - codex
+    preferred_harness: claude_code
+    preferred_pool: claude
   cross_provider_high_risk_review:
-    - claude
-    - codex
+    reviewer_pool_must_differ_from_implementer_pool: true
 
 risk:
   low:
-    preferred_root:
-      - claude
-      - codex
-      - deepseek
-    preferred_execution_lead:
-      - codex
-      - deepseek
-      - claude
-    preferred_worker:
-      - deepseek
-      - codex
-      - claude
+    preferred_harness:
+      root: pi
+      execution_lead: pi
+      worker: pi
     independent_review: false
 
   medium:
-    preferred_root:
-      - claude
-      - codex
-      - deepseek
-    preferred_execution_lead:
-      - codex
-      - deepseek
-      - claude
-    preferred_worker:
-      - deepseek
-      - codex
-      - claude
-    preferred_specialist:
-      - claude
-      - codex
-    preferred_reviewer:
-      - claude
-      - codex
+    preferred_harness:
+      root: pi
+      execution_lead: pi
+      worker: pi
     independent_review: conditional
 
   high:
-    preferred_root:
-      - claude
-      - codex
-      - deepseek
-    preferred_execution_lead:
-      - codex
-      - claude
-      - deepseek
-    preferred_worker:
-      - deepseek
-      - codex
-      - claude
-    preferred_specialist:
-      - claude
-      - codex
-    preferred_reviewer:
-      - claude
-      - codex
+    preferred_harness:
+      root: claude_code
+      execution_lead: codex_cli
+      worker: pi
+    preferred_pool:
+      reviewer: claude
     independent_review: required
     reviewer_provider_diversity: cross_provider_or_human_visible_residual_risk_waiver
 
 principles:
   - use_cheapest_capable_resource
   - prefer_deterministic_tools_before_model_calls
-  - claude_is_default_root_preference
-  - codex_is_default_execution_lead_preference
-  - deepseek_is_preferred_for_well_scoped_worker_tasks
+  - route_by_role_then_harness_then_model_pool
+  - root_selects_the_execution_lead_harness_class
+  - pi_is_the_default_execution_lead_harness_for_well_scoped_low_medium_work
+  - codex_is_a_premium_execution_lead_escalation_not_a_mandatory_binding
+  - deepseek_is_a_preferred_low_cost_pool_for_well_scoped_execution_not_a_permanent_role
   - root_reentry_is_limited_to_the_closed_escalation_list
   - normal_execution_usage_substantially_exceeds_root_usage
   - root_does_not_run_the_implementation_edit_verify_fix_loop
   - preserve_premium_capacity_for_high_value_reasoning
-  - allow_provider_fallback
+  - allow_model_pool_fallback
   - do_not_permanently_bind_provider_to_role

@@ -1,7 +1,12 @@
 # Root Role
 
-Own the final task outcome as the Cognitive Control Plane. Claude is the preferred provider,
-not a permanent binding.
+Own the final task outcome as the Cognitive Control Plane. Select the Execution Lead
+harness class per task and record it in the Execution Packet: the default is the **Pi
+Standard/Fast Lead** for well-scoped, lower-complexity, LOW/MEDIUM work; the **Codex
+Premium Lead** is the escalation for difficult engineering reasoning, complex repository
+investigation, difficult debugging, HIGH-risk or cross-module implementation, and when
+cheaper execution proves insufficient. Pi is a harness with a runtime-selected model, not
+a fixed model; no harness or model/provider pool is a permanent binding.
 
 Own requirement clarification, goal definition, reconnaissance strategy, architecture
 planning, acceptance criteria, constraints and non-goals, risk classification, Execution

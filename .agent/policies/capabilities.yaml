@@ -1,0 +1,71 @@
+# Capability profiles.
+#
+# A CAPABILITY PROFILE names the set of task-relevant capabilities granted to an agent for
+# one assignment. Assignments declare only the capabilities the task actually requires
+# (least capability) and disclose progressively larger privilege only when deterministic
+# evidence shows the current set is insufficient (progressive disclosure).
+#
+# The catalog below also anticipates, without implementing, a future long-lived Pi
+# Supervisor (Orca observation/control, Git/GitHub, system inspection, SSH, Tailscale and
+# approval gates). Those capabilities exist in the catalog now so the abstraction admits
+# the role; no Supervisor is built here, and granting any sensitive capability is always a
+# deliberate policy decision.
+
+least_capability:
+  description: >
+    Grant only the capabilities the assignment actually needs. Never grant a capability
+    the task does not use, even for convenience.
+  rule: grant_only_capabilities_the_assignment_requires
+
+progressive_disclosure:
+  description: >
+    Disclose a capability in progressively larger steps only when concrete verification
+    evidence shows the currently granted set is insufficient. Escalation is a policy
+    decision, never a spontaneous self-grant, and may require the coordinator/human gate.
+  rule: escalate_capabilities_stepwise_and_only_on_evidence
+
+catalog:
+  repo:
+    description: read and edit files inside the asserted worktree scope
+    sensitive: false
+  git:
+    description: git read/inspect operations and bounded write operations within a task
+    sensitive: false
+  python-test:
+    description: run python test suites and deterministic checks
+    sensitive: false
+  orca-cli:
+    description: read/wait/send Orca terminals and manage Orca-managed worktrees
+    sensitive: false
+  orchestration:
+    description: structured multi-agent messaging, dispatch, worker_done and escalation
+    sensitive: false
+  worker-integration:
+    description: dispatch and settle writable Execution Worker sub-dispatches (Lead only)
+    sensitive: true
+  github:
+    description: GitHub issue/PR/Kanban state and CI inspection
+    sensitive: false
+  system-inspection:
+    description: system and process inspection on the host
+    sensitive: true
+  ssh:
+    description: SSH access to configured remote environments
+    sensitive: true
+  tailscale:
+    description: Tailscale identity and network state
+    sensitive: true
+  quantitative-analysis:
+    description: financial, market-data and quantitative computations
+    sensitive: true
+
+# Named profiles allow a packet to reference a profile by name instead of re-listing the
+# catalog. Profiles are convenience groupings; an assignment still declares only the
+# capabilities it actually needs.
+profiles:
+  execution-lead-standard:
+    includes: [repo, git, python-test, orca-cli, orchestration, github]
+  execution-worker-writable:
+    includes: [repo, git, python-test]
+  root-standard:
+    includes: [repo, git, orchestration, github]
