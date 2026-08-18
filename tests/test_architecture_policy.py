@@ -31,53 +31,231 @@ def fenced_code_blocks(document: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Defect-class enforcement: the architecture must never bind a provider/model-pool
-# name to an agent role anywhere in LIVE text (not merely in one quoted section).
-# The historical decision records ADR-001/002/003 are explicitly excluded by path
-# below; everything else on disk counts as live architecture text.
+# Bilingual no-provider-as-role invariant.
+#
+# Scope and known limits (stated here so the docstring never overclaims):
+#   * The invariant is LANGUAGE-INDEPENDENT. docs/ARCHITECTURE.md is majority-Chinese
+#     prose, and role nouns appear as the same Latin tokens in both languages, so the
+#     provider and role vocabularies below cover BOTH an English sentence and a Chinese
+#     sentence. Chinese binding operators (provider 偏好 / 默认 provider / 偏好为 /
+#     绑定 / 是) are detected as binding markers, so the pre-amendment B1 defect text
+#     reintroduced in Chinese is caught.
+#   * Provider/model-pool names (pool names, NOT HARNESS class names). Harness classes
+#     are named claude_code / codex_cli / pi and are deliberately NOT in this set, so
+#     legitimate harness-class vocabulary is expressible. "Pi" is a harness, not a pool,
+#     and is likewise absent.
+#   * The guard is a syntactic scan of the documented binding forms, NOT semantic proof.
+#     A provider name only triggers when it is bound to a role noun through an explicit
+#     structural operator (adjacency, "is"/"run by", "for", ":" , "=", "role:",
+#     "agent:", or the Chinese operators). Mere co-occurrence in a sentence - e.g.
+#     "Root prefers the Claude Code harness with a capable pool" - is a preference and
+#     is NOT flagged.
+#   * Genuinely historical / superseded-model narration is excluded ONLY when wrapped in
+#     the explicit escape hatch `<!-- HISTORICAL-BINDING-START --> ... <!--
+#     HISTORICAL-BINDING-END -->` (or a single-line `HISTORICAL-BINDING` comment). Every
+#     usage is auditable by grepping for HISTORICAL-BINDING; the escape hatch is for
+#     real history, never for live policy. ADR-004 uses it for its pre-amendment Context
+#     narrative and the superseded single-Codex quote.
+#   * Machine-readable policy config (YAML key/value assignments, e.g. `reviewer:
+#     claude`, `preferred_pool: deepseek`) is a routed preference, not prose, so ONLY
+#     YAML comment lines are scanned. A pool name appearing as a config VALUE is not
+#     swept up merely for existing (see S3).
+#   * ADR-001/002/003 are excluded by path below (they are retained as historical
+#     records of the provider-role preferences ADR-004 supersedes).
 # ---------------------------------------------------------------------------
-# Provider/model-pool names (pool names, not HARNESS class names). Harness classes
-# are named claude_code / codex_cli / pi and are deliberately NOT in this set, so
-# legitimate harness-class vocabulary is expressible. "Pi" is a harness, not a pool,
-# and is likewise absent.
-PROVIDER_NAME_RE = r"(?:claude|codex|deepseek|gemini|kimi|minimax|ark|volcengine)"
-# Role nouns that must never be directly qualified by a provider name.
+PROVIDER_NAME_RE = r"(?:claude|codex|deepseek|gemini|kimi|minimax|volcengine|ark)"
+# Role nouns that must never be qualified by a provider name. Hyphens are tolerated in
+# compound role names so "Codex-Execution-Lead" and "Codex Execution Lead" (and a
+# trailing plural "Execution Leads") are all recognized. The bare nouns lead, worker,
+# reviewer, specialist, steward, root are included per the reproducible evasions.
 ROLE_NOUN_RE = (
-    r"(?:root|cognitive control plane|execution lead|engineering control plane|"
-    r"execution worker|reviewer)"
+    r"(?:execution[ \-]?lead|engineering[ \-]?control[ \-]?plane|"
+    r"cognitive[ \-]?control[ \-]?plane|execution[ \-]?worker|"
+    r"platform[ \-]?steward|lead|worker|reviewer|specialist|steward|root)"
 )
-# Defect class patterns, mirroring the forms the re-review reproduced:
-#   "<Provider> <Role>"            (immediate binding, e.g. "Codex Execution Lead")
-#   "default ... agent: <Provider>"  (e.g. "default engineering agent: Codex (all tasks)")
-#   "preferred provider: <Provider>"
-#   "<Role> ... provider: <Provider>"
-# The immediate binding requires whitespace (never an underscore), so the HARNESS names
-# claude_code / codex_cli never match, and any intervening QUALIFIER (Premium,
-# Standard/Fast, "Claude Code") breaks the role adjacency, which is what preserves the
-# legitimate harness-class phrases "Codex Premium escalation / Lead" and "Pi Standard/Fast".
-PROVIDER_ROLE_BINDING_RE = re.compile(
-    r"\b" + PROVIDER_NAME_RE + r"\s+" + ROLE_NOUN_RE + r"\b", flags=re.IGNORECASE
+# Adjacent-bound patterns: a provider or role name glued to the OTHER by spaces, tabs
+# or a hyphen (never an underscore, so the HARNESS names claude_code / codex_cli and a
+# config key like `preferred_pool` cannot match). These only match WITHIN a line and do
+# not cross a newline, so a fenced-diagram line like "Control Plane\nClaude Code
+# harness" is not collapsed into a false "Control Plane Claude" adjacency.
+IMMEDIATE_BINDINGS = (
+    (
+        "provider-role",
+        re.compile(
+            r"\b(?:%s)[ \t\-\u2010]+%s(?:s\b)?" % (PROVIDER_NAME_RE, ROLE_NOUN_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "role-provider",
+        re.compile(
+            r"%s(?:s\b)?[ \t\-\u2010]+(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
 )
-DEFAULT_AGENT_BINDING_RE = re.compile(
-    r"\bdefault\b[^.\n]{0,60}?\bagent\b[^.\n]{0,12}?\s*[:=]\s*"
-    + PROVIDER_NAME_RE + r"\b",
-    flags=re.IGNORECASE,
+# Structural / operator-bound patterns. These require an explicit binding operator, so
+# they are safe to apply after collapsing newlines to spaces (catching a role on one
+# line and "provider: X" on the next) WITHOUT inventing text out of fenced diagrams:
+# a bare diagram line has no operator to attach to.
+LINK_BINDINGS = (
+    (
+        "role-:-",
+        re.compile(
+            r"%s\b[^\n:.=]{0,26}?[:=][ \t]*(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "role-is",
+        re.compile(
+            r"%s\b[^\n.]{0,20}?\b(?:is|are)\b[ \t]*(?:always|run by|the|a|an)?"
+            r"[ \t]*(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "is-role",
+        re.compile(
+            r"\b(?:%s)\b[ \t]*(?:is|are|was|were)[ \t]*(?:the|a|an|permanent)?"
+            r"[ \t]*%s\b" % (PROVIDER_NAME_RE, ROLE_NOUN_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "for-role",
+        re.compile(
+            r"\b(?:%s)\b[ \t]*,?[ \t]*(?:for|preferred for|preferred)"
+            r"[ \t]*(?:the[ \t]*)?%s\b" % (PROVIDER_NAME_RE, ROLE_NOUN_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "default-agent",
+        re.compile(
+            r"\bdefault\b[^\n:.]{0,40}?\b(?:agent|role)\b[^\n:.]{0,20}?[:=][ \t]*(?:%s)\b"
+            % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    # Chinese binding operators (majority-chinese doc: these MUST catch the original
+    # B1 defect reintroduced as 默认 provider 偏好为 X / 绑定).
+    (
+        "cn-provider-pref",
+        re.compile(
+            r"provider[ \t]*偏好[ \t]*为?[ \t]*[:：]?[ \t]*(?:%s)\b" % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-default-provider",
+        re.compile(
+            r"默认[ \t]*provider[ \t]*(?:偏好)?[ \t]*为?[ \t]*[:：]?[ \t]*(?:%s)\b"
+            % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-pref-wei",
+        re.compile(
+            r"偏好[ \t]*为[ \t]*[:：]?[ \t]*(?:%s)\b" % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-provider-colon",
+        re.compile(
+            r"provider[ \t]*[:：=][ \t]*(?:%s)\b" % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-role-shi",
+        re.compile(
+            r"%s\b[ \t]*是[ \t]*(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-bind-after",
+        re.compile(
+            r"\b(?:%s)\b[\s\u4e00-\u9fff]{0,8}?(?:绑定|永久绑定)(?:到|至|于)?"
+            % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-bind-before",
+        re.compile(
+            r"绑定(?:到|至|于)?[ \t]*(?:%s)\b" % PROVIDER_NAME_RE,
+            flags=re.IGNORECASE,
+        ),
+    ),
+    (
+        "cn-role-pref",
+        re.compile(
+            r"%s\b[ \t]*偏好[ \t]*为[ \t]*(?:%s)\b" % (ROLE_NOUN_RE, PROVIDER_NAME_RE),
+            flags=re.IGNORECASE,
+        ),
+    ),
 )
-PREFERRED_PROVIDER_BINDING_RE = re.compile(
-    r"\bpreferred provider\b[^.\n]{0,8}?\s*[:=]\s*" + PROVIDER_NAME_RE + r"\b",
-    flags=re.IGNORECASE,
-)
-ROLE_PROVIDER_BINDING_RE = re.compile(
-    ROLE_NOUN_RE + r"\b[^.\n]{0,60}?provider\b[^.\n]{0,12}?\s*[:=]\s*"
-    + PROVIDER_NAME_RE + r"\b",
-    flags=re.IGNORECASE,
-)
-PROVIDER_ROLE_BINDINGS = (
-    ("provider-role", PROVIDER_ROLE_BINDING_RE),
-    ("default-agent", DEFAULT_AGENT_BINDING_RE),
-    ("preferred-provider", PREFERRED_PROVIDER_BINDING_RE),
-    ("role-provider", ROLE_PROVIDER_BINDING_RE),
-)
+# The explicit escape hatch: any passage wrapped between
+#   <!-- HISTORICAL-BINDING-START --> ... <!-- HISTORICAL-BINDING-END -->
+# (or a single-line comment whose body contains HISTORICAL-BINDING) is stripped before
+# scanning, so genuinely historical / superseded-model narration can be quoted verbatim
+# without tripping the live invariant. Every usage is auditable via a grep for
+# HISTORICAL-BINDING and is reserved for real history, never for live policy.
+HISTORICAL_ESCAPE_START = re.compile(r"(?s)<!--\s*HISTORICAL-BINDING-START.*?HISTORICAL-BINDING-END\s*-->")
+HISTORICAL_ESCAPE_SINGLE = re.compile(r"<!--\s*HISTORICAL-BINDING[^>]*?-->")
+
+
+def strip_historical_escape_hatch(text: str) -> str:
+    """Remove HISTORICAL-BINDING escape-hatch regions before scanning."""
+    return HISTORICAL_ESCAPE_SINGLE.sub(" ", HISTORICAL_ESCAPE_START.sub(" ", text))
+
+
+def provider_bindings_in_text(text: str) -> list[tuple[str, str]]:
+    """Return (pattern-name, matched-snippet) for every live provider-as-role binding.
+
+    Immediate (adjacency) patterns run per physical line so they can never fuse across
+    a newline inside a fenced diagram; operator-bound patterns run on the newline-
+    collapsed text so a role on one line and a binding on the next (e.g. "Execution
+    Lead\nprovider: Codex") is caught.
+    """
+    text = strip_historical_escape_hatch(text)
+    findings: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        for name, pattern in IMMEDIATE_BINDINGS:
+            for match in pattern.finditer(line):
+                findings.append((name, match.group(0)))
+    collapsed = re.sub(r"\s+", " ", text)
+    for name, pattern in LINK_BINDINGS:
+        for match in pattern.finditer(collapsed):
+            findings.append((name, match.group(0)))
+    return findings
+
+
+def provider_bindings_in_document(path: Path) -> list[tuple[str, str]]:
+    """Scan one live architecture document for provider-as-role bindings.
+
+    For YAML policy files only the comment lines are treated as prose: a structural
+    key/value assignment (e.g. `reviewer: claude`, `preferred_pool: deepseek`) is a
+    routed preference keyed to a pool name, NOT prose narration, so it must not be
+    scooped up merely for existing. This is the config-vs-prose distinction.
+    """
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    text = strip_historical_escape_hatch(raw)
+    if path.suffix in {".yaml", ".yml"}:
+        comments = [
+            line.lstrip().lstrip("#").strip()
+            for line in text.splitlines()
+            if line.lstrip().startswith("#")
+        ]
+        findings: list[tuple[str, str]] = []
+        for comment in comments:
+            findings.extend(provider_bindings_in_text(comment))
+        return findings
+    return provider_bindings_in_text(text)
 
 
 def live_architecture_documents() -> list[Path]:
@@ -1045,32 +1223,121 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("Claude Code harness default", architecture)
 
     def test_no_live_provider_as_role_binding_anywhere(self) -> None:
-        """The no-provider-as-role invariant holds across ALL live architecture text.
+        """Bilingual no-provider-as-role invariant across ALL live architecture text.
 
-        Earlier B1 assertions pinned literal strings ("preferred provider:",
-        "DeepSeek Execution Worker"), so a freshly-worded provider-as-role binding such
-        as "default engineering agent: Codex (all tasks)" slipped straight through green
-        CI. This test targets the defect CLASS: it scans every live document for a
-        provider/model-pool name bound to a role noun in any of the reproduced forms.
-        Harness-class vocabulary remains expressible because harness names are
-        underscore-connected (claude_code, codex_cli; "Pi" is a harness, not a pool)
-        and an intervening qualifier (Premium / Standard/Fast / "Claude Code") breaks
-        the adjacency, which is the very distinction the allowlist exists to preserve.
+        This is NOT a string-pin test: it targets the defect CLASS through the bilingual
+        provider/role vocabularies and the binding operators defined above. What it
+        genuinely enforces, and its honest limits, are:
+
+        - It flags a provider/model-pool name bound to a role noun in the documented
+          forms (adjacency, "is"/"are"/"run by", "for", ":", "=", "role:", "agent:",
+          and the Chinese operators provider 偏好 / 默认 provider / 偏好为 / 绑定 / 是)
+          in English OR Chinese.
+        - Harness-class vocabulary stays expressible: claude_code / codex_cli / pi are
+          harnesses, "Pi" is never a pool, and an intervening qualifier (Premium,
+          Standard/Fast, "Claude Code harness") breaks the adjacency.
+        - It is a syntactic scan, not semantic proof. A binding phrased with an operator
+          the documented pattern set does not cover could still evade and must be
+          reported, never asserted away.
+        - It does not scan structural YAML key/value assignments (config preference), and
+          it trusts the HISTORICAL-BINDING escape hatch for genuinely superseded
+          narration; ADR-001/002/003 are excluded by path.
         """
         failures = []
         for path in live_architecture_documents():
-            content = path.read_text(encoding="utf-8", errors="replace")
-            for name, pattern in PROVIDER_ROLE_BINDINGS:
-                for match in pattern.finditer(content):
-                    snippet = content[
-                        max(0, match.start() - 40): match.end() + 40
-                    ].replace("\n", " ")
-                    failures.append(f"{name} binding in {path.relative_to(ROOT)}: {snippet!r}")
+            for name, matched in provider_bindings_in_document(path):
+                failures.append(
+                    f"{name} binding in {path.relative_to(ROOT)}: {matched!r}"
+                )
         if failures:
             self.fail(
                 "Live architecture text binds a provider name to an agent role:\n"
                 + "\n".join(failures)
             )
+
+    def test_guard_catches_documented_evasion_cases(self) -> None:
+        """Every reproducible evasion E1-E14 must now FAIL the guard when present.
+
+        These are the 14 rewording+insertion cases the review pass mounted against the
+        previous English-only, line-anchored regexes; all 14 previously passed. The guard
+        must catch every one. Harness-class vocabulary (Pi Standard/Fast Lead, Codex
+        Premium escalation, claude_code, codex_cli) must still pass.
+        """
+        evasions = {
+            "E1 Execution Lead: Codex": "Execution Lead: Codex",
+            "E2 Codex Lead for every task": "Codex Lead for every task",
+            "E3 DeepSeek Worker dispatched by the Lead": "DeepSeek Worker dispatched by the Lead",
+            "E4 Root agent: Claude": "Root agent: Claude",
+            "E5 The Execution Lead is always Codex.": "The Execution Lead is always Codex.",
+            "E6 Execution Worker = DeepSeek": "Execution Worker = DeepSeek",
+            "E7 Codex Execution Leads own delivery": "Codex Execution Leads own delivery",
+            "E8 Codex-Execution-Lead owns delivery": "Codex-Execution-Lead owns delivery",
+            "E9 Codex Specialist owns hard problems": "Codex Specialist owns hard problems",
+            "E10 Platform Steward: Claude": "Platform Steward: Claude",
+            "E11 role triple": (
+                "Execution Lead role: Codex. "
+                "Execution Worker role: DeepSeek. "
+                "Root role: Claude."
+            ),
+            "E12 newline gap": "Execution Lead\nprovider: Codex",
+            "E13 run by": "The Execution Lead is run by Codex on every task.",
+            "E14 verbatim pre-amendment Chinese": (
+                "Execution Lead 是 first-class Engineering Control Plane，默认 provider "
+                "偏好为 Codex，但不是永久绑定。"
+            ),
+        }
+        for label, inserted in evasions.items():
+            findings = provider_bindings_in_text(inserted)
+            self.assertTrue(
+                findings,
+                f"guard failed to catch {label}: {inserted!r}",
+            )
+
+        legit = [
+            "Root prefers the Claude Code harness with a capable pool",
+            "Codex Premium Lead",
+            "Pi Standard/Fast Lead",
+            "Claude Code harness default / capable pool",
+            "Pi Standard/Fast default becomes Codex Premium escalation on difficult work",
+            "codex-cli harness + codex pool",
+            "claude_code harness",
+            "没有任何 harness 或 model/provider pool 是永久 role binding",
+            "Worker role 不绑定任何 model/provider pool",
+            "Root / Execution Lead / Worker / Reviewer 是动态角色，不与 provider 永久绑定",
+        ]
+        for phrase in legit:
+            self.assertEqual(
+                [],
+                provider_bindings_in_text(phrase),
+                f"false positive on legitimate harness vocabulary: {phrase!r}",
+            )
+
+    def test_guard_escape_hatch_and_config_distinction(self) -> None:
+        """S3: historical narration (escape hatch) and policy-config both stay unflagged.
+
+        The same historical clause is FLAGGED as a live prose binding but PASSES once it
+        is wrapped in the HISTORICAL-BINDING escape hatch; and a machine-readable config
+        preference (`reviewer: claude`) is a key whose value is a pool name, so it must
+        not be swept up as a prose role binding. routing.yaml carries such a key today.
+        """
+        historical = 'the single "Codex Execution Lead" binding'
+        self.assertTrue(provider_bindings_in_text(historical), "quote should flag as live prose")
+        marked = (
+            "<!-- HISTORICAL-BINDING-START: superseded pre-ADR-004 binding -->\n"
+            + historical
+            + "\n<!-- HISTORICAL-BINDING-END -->"
+        )
+        self.assertEqual(
+            [], provider_bindings_in_text(marked), "escape hatch must un-flag historical prose"
+        )
+
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        self.assertIn("claude", routing["risk"]["high"]["preferred_pool"]["reviewer"])
+        self.assertEqual(
+            [],
+            provider_bindings_in_document(ROOT / ".agent" / "policies" / "routing.yaml"),
+            "policy-config preference keys must not be flagged as prose role bindings",
+        )
 
     def test_root_selects_execution_lead_harness(self) -> None:
         routing = self.load_yaml(".agent/policies/routing.yaml")

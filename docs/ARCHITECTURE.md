@@ -563,8 +563,9 @@ parallel interaction 按第 8 项映射 condition 2/3/5/6。Root 不接管 align
 
 ### 6.1 Root
 
-每个 outcome 只有一个 Root。Root 是 Cognitive Control Plane，默认 provider 偏好为
-Claude，但不是永久绑定。Root 负责：
+每个 outcome 只有一个 Root。Root 是 Cognitive Control Plane，默认偏好使用 Claude Code
+harness（capable pool）；没有 harness 或 model/provider pool 是永久 role binding。
+Root 负责：
 
 - requirement clarification；
 - goal definition；

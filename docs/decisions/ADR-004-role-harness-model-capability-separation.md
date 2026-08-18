@@ -7,11 +7,16 @@
 
 ## Context
 
+<!-- HISTORICAL-BINDING-START: the paragraph below records the pre-ADR-004 provider-role
+preferences verbatim as historical context. It is superseded narration, not live policy,
+and is excluded from the live no-provider-as-role invariant by the HISTORICAL-BINDING
+escape hatch. -->
 ADR-002 introduced two control planes and recorded provider preferences (Claude preferred
 for the Root, Codex for the Execution Lead, DeepSeek for the Worker). Over time these
 preferences were read as role bindings: the architecture began to look like DeepSeek is a
 Worker and Codex is the Execution Lead for every task, and success was partly measured as
 "Codex usage greater than Claude usage."
+<!-- HISTORICAL-BINDING-END -->
 
 That is factually wrong and blocks a future Pi Supervisor. Pi is a **harness** whose model
 is selected at runtime from a model/provider pool: on one host the default pool is
@@ -38,7 +43,11 @@ Separate four axes:
 provider-role binding. Pi under Orca launches through `orca orchestration worker-start`;
 choosing a harness never bypasses `worker-start`.
 
-Two Execution Lead harness classes replace the single Codex-as-Execution-Lead role binding:
+<!-- HISTORICAL-BINDING-START: "Codex Execution Lead" below is the accurate pre-ADR-004
+quotation of the superseded single-role binding; ADR-004 replaces it with the two harness
+classes. Historical, not live policy. -->
+Two Execution Lead harness classes replace the single "Codex Execution Lead" binding:
+<!-- HISTORICAL-BINDING-END -->
 
 - **Pi Standard/Fast Lead** — default for well-scoped, lower-complexity, LOW/MEDIUM work.
 - **Codex Premium Lead** — for difficult engineering reasoning, complex repository
@@ -129,3 +138,29 @@ capability catalog and the new packet fields exist, that the efficiency principl
 the terse-reporting clarity overrides exist, that Caveman is not a dependency, that the
 execution-cost metrics replace the provider-usage objective, that efficiency policy does
 not weaken HIGH-risk guardrails, and that the validated lifecycle invariants survive.
+
+### The no-provider-as-role guard is a best-effort forward gate, not a proof
+
+The `test_no_live_provider_as_role_binding_anywhere` policy test is a standing CI gate
+that scans live architecture text for a provider/model-pool name bound to a role noun.
+It is a deliberate, documented syntactic heuristics and its limits are known and stated
+here and in the test docstring so the suite is not overclaimed:
+
+- It is bilingual by construction: docs/ARCHITECTURE.md is majority-Chinese prose and the
+  role nouns appear as the same Latin tokens in both languages, so the guard models both
+  languages and the Chinese binding operators (`provider 偏好` / `默认 provider` /
+  `偏好为` / `绑定` / `是`). The earlier English-only, line-anchored regexes were blind
+  to Chinese and to reworded forms; this guard closes that gap.
+- It is a best-effort matcher, not semantic proof. Only the documented binding forms are
+  modeled; a provider/role claim phrased through an operator the pattern set does not
+  cover could evade and would have to be reported, not asserted away.
+- Machine-readable policy config is exempt by design: a YAML key whose value is a pool
+  name (e.g. a reviewer key holding the value claude, or a preferred-pool key holding
+  deepseek) is a routed preference, not prose narration, and is not swept up merely for
+  existing. Only YAML comment lines are scanned as prose.
+- Genuinely historical / superseded narration is exempt only through the explicit
+  `HISTORICAL-BINDING` escape hatch (used above in this ADR's Context and the
+  single-Codex quotation). ADR-001/002/003 are additionally excluded by path.
+- Harness-class vocabulary (Pi Standard/Fast, Codex Premium escalation/Lead,
+  `claude_code`, `codex_cli`) remains expressible; a harness is not a pool, `Pi` is
+  never a pool, and an intervening qualifier breaks the adjacency.

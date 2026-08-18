@@ -11,13 +11,14 @@ never bypasses `worker-start`.
 
 ## Execution Lead classes
 
-Pi can act as an **Execution Lead** in two ways:
+Pi supplies one Execution Lead harness class, the **Pi Standard/Fast Lead** — the default
+for well-scoped, lower-complexity, LOW/MEDIUM work where deterministic verification
+dominates and the model cost floor is sufficient.
 
-- **Pi Standard/Fast Lead** — the default for well-scoped, lower-complexity, LOW/MEDIUM
-  work where deterministic verification dominates and the model cost floor is sufficient.
-- **Pi Premium-aware Lead policy** — for tasks where the Root selects Codex (the Codex
-  Premium Lead) instead, Pi remains the harness for Root, Reviewer, Worker and Specialist
-  roles.
+For difficult engineering the Root may escalate to the **Codex Premium Lead** instead; in
+that case Pi does not act as the Execution Lead — it remains the harness available for the
+Root, Reviewer, Worker and Specialist roles. Pi is a harness that CAN act as the Execution
+Lead, not one that must.
 
 The Root selects the Execution Lead harness class per task; it is not a permanent binding.
 

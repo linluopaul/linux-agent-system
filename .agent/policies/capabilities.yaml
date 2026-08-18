@@ -61,7 +61,9 @@ catalog:
 
 # Named profiles allow a packet to reference a profile by name instead of re-listing the
 # catalog. Profiles are convenience groupings; an assignment still declares only the
-# capabilities it actually needs.
+# capabilities it actually needs. Every routing role has at least one profile so a packet
+# never has to reference an absent profile (the Platform Steward role was omitted from the
+# routing map, and the reviewer had no profile, so both are now covered; N7).
 profiles:
   execution-lead-standard:
     includes: [repo, git, python-test, orca-cli, orchestration, github]
@@ -69,3 +71,7 @@ profiles:
     includes: [repo, git, python-test]
   root-standard:
     includes: [repo, git, orchestration, github]
+  reviewer-independent:
+    includes: [repo, git, orca-cli, orchestration, github]
+  platform-steward-standard:
+    includes: [repo, git, orca-cli, github]

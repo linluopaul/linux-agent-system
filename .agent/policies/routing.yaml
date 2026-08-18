@@ -43,6 +43,7 @@ defaults:
     execution_lead: pi
     specialist: pi
     reviewer: pi
+    platform_steward: pi
     worker: pi
   execution_lead:
     standard_harness: pi
