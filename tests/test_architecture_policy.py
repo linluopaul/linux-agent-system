@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import re
+import subprocess
 import unittest
 
 try:
@@ -264,23 +265,102 @@ def provider_bindings_in_document(path: Path) -> list[tuple[str, str]]:
     return provider_bindings_in_text(text)
 
 
+def _is_under(path: Path, parent: Path) -> bool:
+    """True if `path` is equal to `parent` or nested below it."""
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_live_architecture_path(path: Path) -> bool:
+    """Is `path` part of the shared live-architecture document set?
+
+    True for a .md/.yaml/.yml file that is a repo-root manifest (AGENTS/README/CLAUDE)
+    or lives under docs/ or .agent/, and is NOT under .github/ or the .agent/runs/
+    telemetry directory. This is the ONE definition of "live architecture text" shared
+    by every repository-walking scanner, so none of them can be perturbed by local
+    runtime telemetry, scratch files or build artifacts.
+    """
+    if path.suffix not in {".md", ".yaml", ".yml"}:
+        return False
+    if _is_under(path, ROOT / ".github"):
+        return False
+    if _is_under(path, ROOT / ".agent" / "runs"):
+        return False
+    return True
+
+
+def tracked_repository_paths() -> list[Path] | None:
+    """Every version-controlled file tracked by Git (any type), or None if git is
+    unavailable. Used to scope every repository-walking scanner to tracked files so a
+    verdict never depends on untracked local telemetry, scratch files or build
+    artifacts."""
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [ROOT / rel for rel in listing.stdout.split("\0") if rel]
+
+
+def tracked_architecture_documents() -> list[Path]:
+    """The shared live-architecture document set: version-controlled docs only.
+
+    This is the single reproducible definition of "live architecture text" used by
+    every repository-walking scanner (the no-provider-as-role invariant, the
+    role->harness cross-check, the codex-default-root guard and the escape-hatch
+    audit). Runtime telemetry under .agent/runs/ is NEVER part of it, so a policy
+    gate returns identical results in CI and in a dirty local working tree.
+
+    Mechanism (preferred): the set is derived from Git with `git ls-files`, so only
+    files recorded in the repository index can ever be scanned. Untracked and
+    git-ignored paths - e.g. the .agent/runs/<task>/report.md telemetry files a local
+    run leaves behind - are excluded by construction even though they exist on disk.
+    A scanner whose verdict depends on untracked local files would not be a reliable
+    gate, and a locally-run task would otherwise produce a spurious failure that CI
+    cannot reproduce.
+
+    Fallback: if Git is unavailable, fall back to an explicit directory allowlist
+    (repo-root AGENTS/README/CLAUDE, docs/, .agent/) plus an explicit .agent/runs/**
+    exclusion, producing the same set without relying on the repository index.
+    """
+    tracked = tracked_repository_paths()
+    if tracked is None:
+        return _allowlisted_architecture_documents()
+    return [p for p in tracked if _is_live_architecture_path(p)]
+
+
+def _allowlisted_architecture_documents() -> list[Path]:
+    """Git-unavailable fallback: explicit allowlist plus .agent/runs exclusion."""
+    paths = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
+    for directory in (ROOT / "docs", ROOT / ".agent"):
+        paths.extend(path for path in directory.rglob("*") if _is_live_architecture_path(path))
+    return paths
+
+
 def live_architecture_documents() -> list[Path]:
     """Every live md/yaml file that documents current architecture or policy.
 
-    Genuinely historical decision records (ADR-001/002/003) are excluded by path so
-    their retro-recorded provider preferences do not trip the live invariant.
+    Backed by tracked_architecture_documents, so only version-controlled files are
+    ever read - runtime telemetry under .agent/runs/ is excluded by construction.
+    Genuinely historical decision records (ADR-001/002/003) are additionally excluded
+    by path so their retro-recorded provider preferences do not trip the live
+    invariant.
     """
     historical = {
         ROOT / "docs" / "decisions" / "ADR-001-orca-first-execution-plane.md",
         ROOT / "docs" / "decisions" / "ADR-002-cognitive-and-engineering-control-planes.md",
         ROOT / "docs" / "decisions" / "ADR-003-lead-worker-git-integration-contract.md",
     }
-    paths = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
-    for directory in (ROOT / "docs", ROOT / ".agent"):
-        for path in directory.rglob("*"):
-            if path.is_file() and path.suffix in {".md", ".yaml", ".yml"} and path not in historical:
-                paths.append(path)
-    return paths
+    return [p for p in tracked_architecture_documents() if p not in historical]
 
 
 # ---------------------------------------------------------------------------
@@ -869,13 +949,11 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_no_current_document_claims_codex_is_the_default_root(self) -> None:
         historical_adr = ROOT / "docs/decisions/ADR-001-orca-first-execution-plane.md"
-        documents = {ROOT / "AGENTS.md", ROOT / "README.md"}
-        for directory in (ROOT / "docs", ROOT / ".agent"):
-            documents.update(
-                path
-                for path in directory.rglob("*")
-                if path.is_file() and path.suffix in {".md", ".yaml", ".yml"}
-            )
+        # The original set was AGENTS.md + README.md + everything under docs/ and
+        # .agent/: this repo-root-to-docs/.agent tracked set minus CLAUDE.md. Shared
+        # tracked_architecture_documents() keeps the set identical to the old coverage
+        # while excluding untracked .agent/runs/ telemetry by construction.
+        documents = set(tracked_architecture_documents()) - {ROOT / "CLAUDE.md"}
 
         forbidden = (
             "codex is the default root",
@@ -1596,13 +1674,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
         README.md, a runbook, a role/harness/provider profile, or a policy file fails here
         instead of relying on a reader to notice a false label.
         """
-        scanned = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
-        for directory in (ROOT / "docs", ROOT / ".agent"):
-            scanned.extend(
-                path
-                for path in directory.rglob("*")
-                if path.is_file() and path.suffix in {".md", ".yaml", ".yml"}
-            )
+        scanned = tracked_architecture_documents()
 
         offenders = []
         for path in scanned:
@@ -1744,27 +1816,37 @@ class ArchitecturePolicyTests(unittest.TestCase):
         # Not an execution-policy requirement nor a role/harness profile requirement.
         efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
         self.assertNotIn("caveman", json.dumps(efficiency).lower())
-        for directory in (ROOT / ".agent" / "roles", ROOT / ".agent" / "harnesses"):
-            if directory.exists():
-                for path in directory.rglob("*"):
-                    if path.is_file():
-                        self.assertNotIn(
-                            "caveman",
-                            path.read_text(encoding="utf-8").lower(),
-                            str(path.relative_to(ROOT)),
-                        )
+        role_harness_dirs = (ROOT / ".agent" / "roles", ROOT / ".agent" / "harnesses")
+        tracked = tracked_repository_paths()
+        if tracked is None:
+            role_harness_paths = [
+                p for d in role_harness_dirs if d.exists() for p in d.rglob("*") if p.is_file()
+            ]
+        else:
+            role_harness_paths = [
+                p for p in tracked if any(_is_under(p, d) for d in role_harness_dirs)
+            ]
+        for path in role_harness_paths:
+            self.assertNotIn(
+                "caveman",
+                path.read_text(encoding="utf-8", errors="replace").lower(),
+                str(path.relative_to(ROOT)),
+            )
 
         # Not a required or installed Skill or Extension. (No skill/extension shorthand
         # is present in the repo's .agent/skills; nothing installs Caveman.)
         skills_dir = ROOT / ".agent" / "skills"
         if skills_dir.exists():
-            for path in skills_dir.rglob("*"):
-                if path.is_file():
-                    self.assertNotIn(
-                        "caveman",
-                        path.read_text(encoding="utf-8").lower(),
-                        str(path.relative_to(ROOT)),
-                    )
+            if tracked is None:
+                skill_paths = [p for p in skills_dir.rglob("*") if p.is_file()]
+            else:
+                skill_paths = [p for p in tracked if _is_under(p, skills_dir)]
+            for path in skill_paths:
+                self.assertNotIn(
+                    "caveman",
+                    path.read_text(encoding="utf-8").lower(),
+                    str(path.relative_to(ROOT)),
+                )
 
         # Terse reporting is a native principle that stands alone without Caveman.
         self.assertIn(
