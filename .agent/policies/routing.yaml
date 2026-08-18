@@ -39,7 +39,8 @@ work_preferences:
   independent_high_risk_review:
     - claude
     - codex
-  cross_provider_review_of_claude_root_design:
+  cross_provider_high_risk_review:
+    - claude
     - codex
 
 risk:
@@ -99,6 +100,7 @@ risk:
       - claude
       - codex
     independent_review: required
+    reviewer_provider_diversity: cross_provider_or_human_visible_residual_risk_waiver
 
 principles:
   - use_cheapest_capable_resource
@@ -107,7 +109,7 @@ principles:
   - codex_is_default_execution_lead_preference
   - deepseek_is_preferred_for_well_scoped_worker_tasks
   - root_reentry_is_limited_to_the_closed_escalation_list
-  - normal_codex_execution_usage_substantially_exceeds_claude_root_usage
+  - normal_execution_usage_substantially_exceeds_root_usage
   - root_does_not_run_the_implementation_edit_verify_fix_loop
   - preserve_premium_capacity_for_high_value_reasoning
   - allow_provider_fallback

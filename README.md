@@ -26,15 +26,16 @@ Provider roles remain replaceable rather than permanently bound:
   search, test generation and mechanical refactoring, normally dispatched by the
   Execution Lead.
 - Independent review uses a fresh, context-isolated session; Claude is preferred, followed
-  by Codex. A Claude-authored HIGH-risk Root design should prefer or add Codex review.
+  by Codex. HIGH-risk review uses a provider different from the implementer when a capable
+  alternative exists, or records a human-visible residual-risk waiver.
 
 Capability, availability, risk and budget can override these preferences.
 
 The Root produces one bounded Execution Packet and supervises through Orca without running
 the edit/verify/fix loop. The Execution Lead owns that loop, chooses any Worker delegation,
-and returns compressed verification evidence; this structure keeps normal Codex execution
-usage substantially above Claude Root usage while one Root remains accountable for the
-outcome.
+and returns compressed verification evidence. These workflow rules are intended to keep
+normal execution usage substantially above Root usage; V0 records the ratio manually, and
+the current Claude/Codex mapping is a preference rather than the invariant.
 
 ## Runtime Boundaries
 

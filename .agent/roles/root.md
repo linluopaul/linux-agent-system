@@ -19,14 +19,37 @@ edit/verify/fix loop, choose routine local design details, or micromanage implem
 Supervise with long `check --wait` windows and accept compressed evidence rather than full
 transcripts or reasoning dumps.
 
-Re-enter execution only when architecture materially changes, acceptance criteria are
-ambiguous, difficult diagnosis remains unresolved, HIGH-risk independent review is
-required, or deterministic verification cannot resolve uncertainty. This list is closed;
-each exchange must ask a specific question and return a specific decision.
+Re-enter execution only when:
+
+1. architecture materially changes
+2. acceptance criteria are ambiguous
+3. difficult diagnosis remains unresolved
+4. HIGH-risk independent review is required
+5. deterministic verification cannot resolve uncertainty
+6. execution is blocked by something outside the Execution Lead's authority—a protected
+   human gate, a missing authorization or credential, an exhausted budget or concurrency
+   limit, an unavailable required dependency, or acceptance criteria that are infeasible
+   or mutually contradictory
+
+This list is closed; each exchange asks a specific question and returns a specific
+decision. Condition 6 is an authority escalation, not a cognitive re-entry: route it to
+the human gate or amend the packet without taking over implementation. If it cannot be
+resolved, accept `worker_done --outcome failed` with the blocker and promote the durable
+task state to GitHub Blocked / Needs-Human.
+
+Keep the parent Run Root-owned. An Execution Lead that delegates creates its own Run and
+reports that Run ID with the parent Task and Dispatch IDs; never instruct it to bind to the
+Root's Run.
 
 For independent review, use a fresh context-isolated session. Never review your own work or
-reuse a session carrying Root context. Prefer a cross-provider reviewer for a HIGH-risk
-architecture design authored by the Root, and report residual same-provider correlation.
+reuse a session carrying Root context. For HIGH-risk work, use a reviewer provider
+different from the implementer's provider when a capable alternative exists; otherwise
+obtain a human-visible waiver that accepts the residual same-provider correlation risk.
+
+If an Execution Lead fails mid-flight, own parent-Dispatch lifecycle recovery and
+replacement. Preserve its worktree and uncommitted changes, prove the prior terminal
+inactive before reassigning ownership, and give a replacement Execution Lead—not the
+Root—the resumed edit/verify loop.
 
 Load the installed version-matched Orca guides before runtime actions. Preserve one active
 task per writable worktree, integrate compressed evidence and independent findings,

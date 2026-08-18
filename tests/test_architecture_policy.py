@@ -1,6 +1,11 @@
 from pathlib import Path
 import unittest
 
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,7 +14,24 @@ def read(relative_path: str) -> str:
     return (ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
+def fenced_block_after(document: str, heading: str) -> list[str]:
+    section = document.split(heading, 1)[1]
+    block = section.split("```text", 1)[1].split("```", 1)[0]
+    return [line.strip() for line in block.strip().splitlines()]
+
+
 class ArchitecturePolicyTests(unittest.TestCase):
+    def load_yaml(self, relative_path: str):
+        if yaml is None:
+            self.skipTest(
+                "PyYAML is not installed and this repository declares no Python dependencies"
+            )
+        return yaml.safe_load(read(relative_path))
+
     def test_orca_is_primary_and_github_is_durable(self) -> None:
         agents = read("AGENTS.md")
         readme = read("README.md")
@@ -26,96 +48,150 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("Herdr is not the default", agents)
         self.assertNotIn("Herdr as the execution and communication plane", agents)
 
-    def test_provider_preference_order(self) -> None:
-        routing = read(".agent/policies/routing.yaml")
+    def test_policy_yaml_parses_and_provider_preferences_hold(self) -> None:
+        if yaml is None:
+            self.skipTest(
+                "PyYAML is not installed and this repository declares no Python dependencies"
+            )
+        policy_paths = sorted((ROOT / ".agent/policies").glob("*.yaml"))
+        parsed = {}
+        for path in policy_paths:
+            try:
+                parsed[path.name] = yaml.safe_load(path.read_text(encoding="utf-8"))
+            except yaml.YAMLError as error:
+                self.fail(f"{path.relative_to(ROOT)} is not valid YAML: {error}")
 
-        self.assertIn(
-            "defaults:\n  preferred_root:\n    - claude",
-            routing,
-        )
-        self.assertIn(
-            "preferred_execution_lead:\n    - codex",
-            routing,
-        )
-        self.assertIn(
-            "preferred_worker:\n    - deepseek",
-            routing,
-        )
-        self.assertIn(
-            "preferred_specialist:\n    - claude",
-            routing,
-        )
-        self.assertIn(
-            "preferred_reviewer:\n    - claude",
-            routing,
-        )
+        routing = parsed["routing.yaml"]
+        defaults = routing["defaults"]
+        self.assertEqual("claude", defaults["preferred_root"][0])
+        self.assertEqual("codex", defaults["preferred_execution_lead"][0])
+        self.assertEqual("deepseek", defaults["preferred_worker"][0])
+        self.assertEqual("claude", defaults["preferred_specialist"][0])
+        self.assertEqual("claude", defaults["preferred_reviewer"][0])
+
+        first_choices = {
+            "preferred_root": "claude",
+            "preferred_execution_lead": "codex",
+            "preferred_worker": "deepseek",
+        }
+        for risk_name, risk_policy in routing["risk"].items():
+            for role_key, provider in first_choices.items():
+                if role_key in risk_policy:
+                    self.assertEqual(
+                        provider,
+                        risk_policy[role_key][0],
+                        f"risk.{risk_name}.{role_key}",
+                    )
+
         self.assertEqual(
-            3,
-            routing.count("    preferred_root:\n      - claude"),
+            "cross_provider_or_human_visible_residual_risk_waiver",
+            routing["risk"]["high"]["reviewer_provider_diversity"],
         )
-        self.assertEqual(
-            3,
-            routing.count("    preferred_execution_lead:\n      - codex"),
-        )
-        self.assertIn("risk.yaml is authoritative", routing)
-        self.assertNotIn("codex_is_default_root_preference", routing)
+        principles = routing["principles"]
         for principle in (
             "claude_is_default_root_preference",
             "codex_is_default_execution_lead_preference",
             "deepseek_is_preferred_for_well_scoped_worker_tasks",
             "root_reentry_is_limited_to_the_closed_escalation_list",
-            "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
+            "normal_execution_usage_substantially_exceeds_root_usage",
+            "do_not_permanently_bind_provider_to_role",
         ):
-            self.assertIn(principle, routing)
-        self.assertIn("do_not_permanently_bind_provider_to_role", routing)
+            self.assertIn(principle, principles)
+        self.assertNotIn(
+            "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
+            principles,
+        )
+        self.assertIn("levels", parsed["risk.yaml"])
+        self.assertIn("execution_lead_failure", parsed["retry.yaml"])
 
     def test_execution_lead_role_and_closed_escalation_contract(self) -> None:
         lead = read(".agent/roles/execution-lead.md")
-        agents = read("AGENTS.md")
-        architecture = read("docs/ARCHITECTURE.md")
-
         self.assertIn("first-class Engineering Control Plane", lead)
         self.assertIn("delegation authority", lead.lower())
         self.assertIn("Execute autonomously", lead)
 
+        documents = {
+            "AGENTS.md": read("AGENTS.md"),
+            ".agent/roles/execution-lead.md": lead,
+            ".agent/roles/root.md": read(".agent/roles/root.md"),
+            "docs/ARCHITECTURE.md": read("docs/ARCHITECTURE.md"),
+            "docs/runbooks/ORCA_WORKFLOW.md": read(
+                "docs/runbooks/ORCA_WORKFLOW.md"
+            ),
+            "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md": read(
+                "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md"
+            ),
+        }
         conditions = (
             "architecture materially changes",
             "acceptance criteria are ambiguous",
             "difficult diagnosis remains unresolved",
             "HIGH-risk independent review is required",
             "deterministic verification cannot resolve uncertainty",
+            "execution is blocked by something outside the Execution Lead's authority—a "
+            "protected human gate, a missing authorization or credential, an exhausted "
+            "budget or concurrency limit, an unavailable required dependency, or "
+            "acceptance criteria that are infeasible or mutually contradictory",
         )
-        for document in (agents, architecture):
-            self.assertIn("closed Root re-entry list", document)
+        for path, document in documents.items():
+            normalized = normalize(document)
+            self.assertIn("closed", normalized.lower(), path)
             for condition in conditions:
-                self.assertIn(condition, document)
+                self.assertIn(condition, normalized, path)
 
-    def test_execution_packet_is_root_to_execution_lead_interface(self) -> None:
-        agents = read("AGENTS.md")
+        for path in (
+            "AGENTS.md",
+            ".agent/roles/execution-lead.md",
+            ".agent/roles/root.md",
+        ):
+            normalized = normalize(documents[path])
+            self.assertIn(
+                "authority escalation, not a cognitive re-entry", normalized, path
+            )
+            self.assertIn("worker_done --outcome failed", normalized, path)
+            self.assertIn("GitHub Blocked / Needs-Human", normalized, path)
+
+    def test_execution_packet_is_exact_root_to_lead_interface(self) -> None:
+        agents = normalize(read("AGENTS.md"))
         architecture = read("docs/ARCHITECTURE.md")
 
-        self.assertIn("sole normal interface from\nRoot to Execution Lead", agents)
-        self.assertIn("Root → Execution Lead", architecture)
-        self.assertIn("sole\nnormal interface", architecture)
-        for field in (
-            "GOAL",
-            "BACKGROUND / PROBLEM STATEMENT",
-            "ACCEPTANCE CRITERIA",
-            "CONSTRAINTS / NON-GOALS",
-            "RISK: LOW | MEDIUM | HIGH",
-            "ARCHITECTURE DECISIONS",
-            "OPEN QUESTIONS DELEGATED",
-            "RECONNAISSANCE STRATEGY",
-            "REQUIRED TESTS / EVALS",
-            "VERIFICATION EVIDENCE REQUIRED",
-            "WORKTREE / BASE COMMIT",
-            "BUDGET / HUMAN GATES",
-            "ESCALATION CONTRACT",
-            "EXPECTED REPORT FORMAT",
-        ):
-            self.assertIn(field, architecture)
+        self.assertIn(
+            "sole normal interface from Root to Execution Lead",
+            agents,
+        )
+        self.assertIn(
+            "Root → Execution Lead",
+            normalize(architecture),
+        )
+        self.assertEqual(
+            [
+                "GOAL",
+                "BACKGROUND / PROBLEM STATEMENT",
+                "ACCEPTANCE CRITERIA",
+                "CONSTRAINTS / NON-GOALS",
+                "RISK: LOW | MEDIUM | HIGH",
+                "ARCHITECTURE DECISIONS",
+                "OPEN QUESTIONS DELEGATED",
+                "RECONNAISSANCE STRATEGY",
+                "REQUIRED TESTS / EVALS",
+                "VERIFICATION EVIDENCE REQUIRED",
+                "WORKTREE / BASE COMMIT",
+                "BUDGET / HUMAN GATES",
+                "ESCALATION CONTRACT",
+                "EXPECTED REPORT FORMAT",
+            ],
+            fenced_block_after(architecture, "## 10. Task and Review Packets"),
+        )
+        self.assertIn(
+            "may narrow the standing conditions",
+            read("AGENTS.md"),
+        )
+        self.assertIn(
+            "不能增加、重定义或绕过六个 standing conditions",
+            architecture,
+        )
 
-    def test_review_independence_is_fresh_session_context_independence(self) -> None:
+    def test_review_independence_and_high_risk_provider_diversity(self) -> None:
         agents = read("AGENTS.md")
         architecture = read("docs/ARCHITECTURE.md")
         reviewer = read(".agent/roles/reviewer.md")
@@ -126,16 +202,63 @@ class ArchitecturePolicyTests(unittest.TestCase):
         for document in (agents, architecture, reviewer):
             self.assertIn("Root", document)
             self.assertIn("private reasoning", document)
-            self.assertIn("correlated", document)
+            self.assertIn("correlation", document)
+            self.assertIn("human-visible", document)
         self.assertIn("must never review its own work", agents)
         self.assertIn("cannot review itself", architecture)
         self.assertIn("may never review its own work", reviewer)
+        self.assertIn(
+            "reviewer's provider MUST differ from the implementer's provider",
+            normalize(agents),
+        )
+        self.assertIn(
+            "reviewer provider MUST differ from the implementer provider",
+            normalize(reviewer),
+        )
+
+    def test_lead_owned_run_topology_and_failure_recovery(self) -> None:
+        architecture = read("docs/ARCHITECTURE.md")
+        runbook = read("docs/runbooks/ORCA_WORKFLOW.md")
+        agents = read("AGENTS.md")
+        retry = self.load_yaml(".agent/policies/retry.yaml")
+
+        for document in (architecture, runbook):
+            normalized = normalize(document)
+            self.assertIn("Root-owned Run", normalized)
+            self.assertIn("Lead-owned Run", normalized)
+            self.assertIn("run-create", normalized)
+            self.assertIn("task-create --run", normalized)
+            self.assertIn("parent Task ID", normalized)
+            self.assertIn("parent Dispatch ID", normalized)
+            self.assertIn("worker-release", normalized)
+        self.assertIn("must never call `run-use`", runbook)
+        self.assertIn("Worker questions terminate at the Lead", runbook)
+        for command in (
+            "ORCA orchestration run-create --objective",
+            "ORCA orchestration task-create --run",
+            "ORCA orchestration worker-start --task",
+            "ORCA orchestration worker-release --dispatch",
+        ):
+            self.assertIn(command, runbook)
+
+        recovery = retry["execution_lead_failure"]
+        self.assertEqual(
+            "root_parent_run_coordinator", recovery["lifecycle_recovery_owner"]
+        )
+        self.assertEqual(
+            "replacement_execution_lead",
+            recovery["resumed_edit_verify_loop_owner"],
+        )
+        for document in (agents, architecture, runbook):
+            normalized = normalize(document)
+            self.assertIn("uncommitted", normalized)
+            self.assertIn("replacement Execution Lead", normalized)
 
     def test_no_current_document_claims_codex_is_the_default_root(self) -> None:
         historical_adr = ROOT / "docs/decisions/ADR-001-orca-first-execution-plane.md"
-        documents = [ROOT / "AGENTS.md", ROOT / "README.md"]
+        documents = {ROOT / "AGENTS.md", ROOT / "README.md"}
         for directory in (ROOT / "docs", ROOT / ".agent"):
-            documents.extend(
+            documents.update(
                 path
                 for path in directory.rglob("*")
                 if path.is_file() and path.suffix in {".md", ".yaml", ".yml"}
@@ -151,11 +274,24 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "| root ownership | codex |",
         )
         for path in documents:
+            content = path.read_text(encoding="utf-8")
             if path == historical_adr:
-                continue
-            content = path.read_text(encoding="utf-8").lower()
+                marker = (
+                    "> Superseded by ADR-002. The list below is historical, "
+                    "not current routing policy."
+                )
+                start = content.index(marker)
+                end_marker = (
+                    "These are routing preferences, never permanent provider-role bindings."
+                )
+                end = content.index(end_marker, start) + len(end_marker)
+                historical_block = content[start:end]
+                self.assertIn("Codex: default Root", historical_block)
+                content = content[:start] + content[end:]
+
+            lower = content.lower()
             for phrase in forbidden:
-                self.assertNotIn(phrase, content, str(path.relative_to(ROOT)))
+                self.assertNotIn(phrase, lower, str(path.relative_to(ROOT)))
 
         historical = historical_adr.read_text(encoding="utf-8")
         self.assertIn("Status: Accepted", historical)
@@ -165,13 +301,27 @@ class ArchitecturePolicyTests(unittest.TestCase):
     def test_cost_asymmetry_metric_and_adr_are_durable(self) -> None:
         agents = read("AGENTS.md")
         architecture = read("docs/ARCHITECTURE.md")
+        steward = read(".agent/roles/platform-steward.md")
         adr = read("docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md")
 
         for document in (agents, architecture):
             self.assertIn("Root micromanagement", document)
             self.assertIn("implementation edit/verify/fix loop", document)
             self.assertIn("compressed evidence", document)
-        self.assertIn("root_vs_execution_usage_share", architecture)
+        for field in (
+            "root_usage_units",
+            "execution_usage_units",
+            "percentage points",
+            ".agent/runs/<task>/metrics.yaml",
+            "manually recorded, not yet automated",
+            "最近 20",
+            "execution_share >= 65%",
+        ):
+            self.assertIn(field, architecture)
+        self.assertIn("root_vs_execution_usage_share", steward)
+        self.assertIn("rolling 20-task window", steward)
+        self.assertNotIn("Enforce\nthat cost asymmetry structurally", agents)
+        self.assertNotIn("structural rules 强制", architecture)
         self.assertIn("Status: Accepted", adr)
         self.assertIn("supersedes **only** ADR-001's provider-role preferences", adr)
         self.assertIn("Orca the primary ADE/worktree/collaboration/orchestration", adr)
@@ -184,11 +334,16 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("independent_review: required", risk)
         self.assertIn("controller_security_and_safety_policy", risk)
         self.assertIn("independent_review: required", routing)
+        self.assertIn(
+            "reviewer_provider_diversity: "
+            "cross_provider_or_human_visible_residual_risk_waiver",
+            routing,
+        )
         self.assertNotIn("reviewer_independence", routing)
 
     def test_orchestration_delivery_must_be_acknowledged(self) -> None:
         runbook = read("docs/runbooks/ORCA_WORKFLOW.md")
-        architecture = " ".join(read("docs/ARCHITECTURE.md").split())
+        architecture = normalize(read("docs/ARCHITECTURE.md"))
 
         self.assertIn("check --ack <delivery_id> --wait", runbook)
         self.assertIn("replays the same oldest Delivery", runbook)
@@ -197,9 +352,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_controller_does_not_duplicate_orca_lifecycle(self) -> None:
         agents = read("AGENTS.md")
-        adr = " ".join(
-            read("docs/decisions/ADR-001-orca-first-execution-plane.md").split()
-        )
+        adr = normalize(read("docs/decisions/ADR-001-orca-first-execution-plane.md"))
 
         self.assertIn("Do not duplicate Orca's deterministic worktree", agents)
         for responsibility in (

@@ -12,8 +12,9 @@ Execute autonomously until acceptance criteria are met or a closed Root re-entry
 applies. Return compressed evidence instead of full transcripts or reasoning dumps, and
 keep durable state in the repository and GitHub rather than only in the session.
 
-Codex is preferred for cross-provider independent review of a HIGH-risk architecture design
-authored by a Claude Root. That review must use a fresh session without Root context.
+Codex is preferred for cross-provider independent review of HIGH-risk work implemented by
+another provider. A Codex implementation requires another capable reviewer provider, or a
+human-visible waiver accepting the residual same-provider correlation risk.
 
 Codex may also act as Root, Worker, specialist or Reviewer when capability, availability,
 budget or independence requirements make it the best fit. The Execution Lead preference is

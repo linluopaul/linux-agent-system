@@ -51,6 +51,9 @@ ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
 ```
 
+The packet's `ESCALATION CONTRACT` may narrow the standing six-condition list but may not
+extend or redefine it.
+
 The Controller may poll, claim, classify policy and choose an eligible node. GitHub remains
 authoritative for task state. Reading the entire codebase to prepare the packet is an
 anti-pattern; repository investigation belongs to the Execution Lead.
@@ -75,13 +78,16 @@ uses Orca Orchestration to delegate bounded execution authority without transfer
 outcome ownership:
 
 ```text
-run-create
-task-create
-worker-start
-check --wait
+Root terminal:
+ORCA orchestration run-create --objective "<task outcome>" --json
+ORCA orchestration task-create --spec "<Execution Packet>" --json
+ORCA orchestration worker-start --task <parent_task_id> ... --json
+ORCA orchestration check --wait ... --json
 process every message in the Delivery
-worker-release OR worker-start --terminal <handle> for immediate reuse
-check --ack <delivery_id> --wait
+ORCA orchestration worker-release --dispatch <lead_dispatch_id> --json
+# or, for immediate reuse:
+ORCA orchestration worker-start --task <followup_task_id> --terminal <handle> --json
+ORCA orchestration check --ack <delivery_id> --wait --json
 ```
 
 A coordinator `check` replays the same oldest Delivery until its `delivery_id` is
@@ -103,6 +109,25 @@ refactoring when a configured launcher is available. An Execution Worker has no 
 authority and routes routine questions to the Lead, not the Root. Agent IDs are
 installation-specific; inspect the runtime rather than guessing an ID.
 
+Run coordinator binding is per-terminal. A dispatched Lead cannot create a Task in the
+Root-owned Run and must never call `run-use` on that Run. For sub-dispatches, run the
+installed and verified grammar from the Execution Lead terminal:
+
+```text
+ORCA orchestration run-create --objective \
+  "Execution sub-run for parent Task <task_id>, Dispatch <dispatch_id>" --json
+ORCA orchestration task-create --run <lead_run_id> --spec "<bounded worker task>" --json
+ORCA orchestration worker-start --task <worker_task_id> ... --json
+ORCA orchestration check --wait --types worker_done,escalation,question ... --json
+ORCA orchestration worker-release --dispatch <worker_dispatch_id> --json
+ORCA orchestration check --ack <delivery_id> ... --json
+```
+
+The Lead owns that separate Lead-owned Run and its inbox. Put the parent Task ID and
+parent Dispatch ID in the objective and final evidence; settle/release every Worker before
+parent `worker_done`. Worker questions terminate at the Lead, and the Root receives only
+compressed Worker evidence.
+
 The Execution Lead re-engages the Root only when:
 
 1. architecture materially changes
@@ -110,22 +135,37 @@ The Execution Lead re-engages the Root only when:
 3. difficult diagnosis remains unresolved
 4. HIGH-risk independent review is required
 5. deterministic verification cannot resolve uncertainty
+6. execution is blocked by something outside the Execution Lead's authority—a protected
+   human gate, a missing authorization or credential, an exhausted budget or concurrency
+   limit, an unavailable required dependency, or acceptance criteria that are infeasible
+   or mutually contradictory
 
 This is a closed list. Each escalation is one specific question followed by one specific
 decision; routine implementation choices, failing tests, refactors, tooling problems and
 local design remain with the Lead.
 
+Condition 6 is an authority escalation, not a cognitive re-entry. The Root routes it to
+the human gate or amends the packet without taking over implementation. If unresolved, the
+Lead sends `worker_done --outcome failed` with the blocker and the Root moves the GitHub
+task to Blocked / Needs-Human.
+
 Independent review uses a fresh session in its own worktree or terminal with no Root
 context or history. Give the Reviewer the original task, acceptance criteria, relevant
 diff or commit, verification evidence, necessary docs and risk level, but not the Root's
 private reasoning/transcript, Execution Packet rationale or Root-authored defense. A Root
-session never reviews its own work. Same-provider review retains correlated-blind-spot
-risk; for a HIGH-risk Claude-authored Root architecture design, prefer or add Codex and
-record the residual risk.
+session never reviews its own work. For HIGH-risk work, choose a provider different from
+the implementer when a capable alternative exists; otherwise require a human-visible
+waiver accepting residual same-provider correlation risk.
 
 A valid supervised Execution Lead, Worker or Reviewer settles its dispatch with exactly
 one `worker_done`. After accepting completion, its coordinator either reuses the exact
 agent for an immediate follow-up or releases it through Orchestration.
+
+If a Lead fails mid-flight, the Root owns parent-Dispatch lifecycle recovery and
+replacement. Preserve the worktree and uncommitted changes; do not let the Root edit them.
+After Orca proves the prior terminal inactive and ownership is reassigned, a replacement
+Execution Lead reuses the preserved worktree or resumes from the last commit/preserved
+artifact in a conflict-free worktree and owns the edit/verify loop.
 
 Use ordinary Orca worktree/terminal prompt delivery only for a genuine ownership handoff
 where the original Root will stop monitoring. Do not mix that flow with tracked dispatch
@@ -172,7 +212,8 @@ The Execution Lead:
 
 The Root:
 
-1. handles only closed-list escalations
+1. handles cognitive conditions 1-5 and routes condition 6 to a human gate or packet
+   amendment
 2. obtains required fresh-session independent review of the reviewable commit
 3. provides bounded review decisions/findings while the Lead retains its active
    implementation loop

@@ -93,16 +93,27 @@ ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
 ```
 
-The Execution Lead re-engages the Root only when one of these five conditions applies:
+The packet's `ESCALATION CONTRACT` may narrow the standing conditions below for a task,
+but it may never extend or redefine this closed list.
+
+The Execution Lead re-engages the Root only when one of these six conditions applies:
 
 1. architecture materially changes
 2. acceptance criteria are ambiguous
 3. difficult diagnosis remains unresolved
 4. HIGH-risk independent review is required
 5. deterministic verification cannot resolve uncertainty
+6. execution is blocked by something outside the Execution Lead's authority—a protected
+   human gate, a missing authorization or credential, an exhausted budget or concurrency
+   limit, an unavailable required dependency, or acceptance criteria that are infeasible
+   or mutually contradictory
 
 This is a closed Root re-entry list. Routine implementation choices, test failures,
 refactors, tooling problems and local design details remain with the Execution Lead.
+Condition 6 is an authority escalation, not a cognitive re-entry: the Root routes it to
+the human gate or amends the Execution Packet and does not take over the implementation
+loop. If the blocker cannot be resolved, the Lead sends `worker_done --outcome failed`
+with the blocker, and the Root promotes the task to GitHub Blocked / Needs-Human.
 
 ## Delegation
 
@@ -143,12 +154,14 @@ The default provider preferences are:
 - DeepSeek for low-cost, well-scoped Execution Worker implementation, search, test
   generation and mechanical refactoring
 - Claude, then Codex, for fresh-session independent review
-- Codex for cross-provider review of a Claude-authored Root architecture design
+- a provider different from the implementer's provider for HIGH-risk review
 
 Availability, capability, budget and task evidence may justify another provider.
 
-Normal total Codex execution usage must substantially exceed Claude Root usage. Enforce
-that cost asymmetry structurally:
+Normal execution usage should substantially exceed Root usage; with current preferences,
+this normally means Codex execution usage exceeds Claude Root usage. The following workflow
+rules are intended to produce that role-first asymmetry, which
+`root_vs_execution_usage_share` verifies once usage is collected:
 
 - Root reconnaissance is bounded to what is needed to specify the work correctly; reading
   the whole codebase to prepare a packet is an anti-pattern.
@@ -223,15 +236,22 @@ and risk level, but not the Root's private reasoning or transcript, Execution Pa
 rationale, implementer reasoning, or the Root's defense of its design.
 
 A Root session must never review its own work, and any session carrying the Root's context
-is not independent. A fresh session using the same provider still has residual correlated
-blind-spot risk. When the HIGH-risk artifact is the Root's own architecture design, prefer
-or add a cross-provider reviewer and record that residual risk in the task report.
+is not independent. For HIGH-risk work, the reviewer's provider MUST differ from the
+implementer's provider when a capable alternative is available. If none is available, a
+human-visible task record MUST contain an explicit waiver accepting the residual
+same-provider correlation risk before completion.
 
 ## Git Rules
 
 Use one active task per branch/worktree.
 
 Do not modify another agent's active worktree.
+
+If an Execution Lead fails mid-flight, the Root owns parent-Dispatch lifecycle recovery
+and replacement, but it does not enter the failed Lead's edit/verify loop. Preserve the
+worktree and uncommitted changes; after Orca proves the prior terminal inactive and
+ownership is explicitly reassigned, a replacement Execution Lead owns that worktree or a
+conflict-free recovery worktree and resumes the loop.
 
 Do not share one writable Git working directory between Linux nodes.
 

@@ -19,9 +19,10 @@ transcript, the rationale portions of its Execution Packet, implementer reasonin
 Root's own defense. Do not assume any of that reasoning is correct.
 
 A Root session may never review its own work, and any session carrying Root context is not
-independent. Same-provider fresh sessions can still share correlated blind spots. For a
-HIGH-risk architecture design authored by the Root, prefer or add a cross-provider reviewer
-and record the residual correlation risk.
+independent. For HIGH-risk work, the reviewer provider MUST differ from the implementer
+provider when a capable alternative exists. Otherwise, the task MUST carry a human-visible
+waiver explicitly accepting the residual same-provider correlation risk before review can
+satisfy the gate.
 
 Review only unless the assignment explicitly authorizes changes, and never modify another
 agent's active worktree.

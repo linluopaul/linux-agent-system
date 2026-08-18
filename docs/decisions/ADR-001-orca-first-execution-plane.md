@@ -61,6 +61,8 @@ not compete with Orca orchestration or GitHub.
 
 Provider preferences become:
 
+> Superseded by ADR-002. The list below is historical, not current routing policy.
+
 - Codex: default Root
 - DeepSeek: preferred low-cost Worker for well-scoped implementation, search and testing
 - Claude: preferred premium specialist for architecture, difficult diagnosis, ambiguity
@@ -101,7 +103,7 @@ requirements are known.
 
 ## Verification
 
-The repository policy tests assert the primary runtime boundary, provider ordering and
-HIGH-risk review requirement. Manual validation must also exercise Orca worktree creation,
-agent launch, supervised review completion and Git synchronization before Controller
-automation is implemented.
+The repository policy tests assert the primary runtime boundary and HIGH-risk review
+requirement; current provider ordering is asserted under ADR-002, not this historical list.
+Manual validation must also exercise Orca worktree creation, agent launch, supervised
+review completion and Git synchronization before Controller automation is implemented.

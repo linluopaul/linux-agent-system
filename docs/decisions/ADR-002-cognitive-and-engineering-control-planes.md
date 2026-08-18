@@ -12,9 +12,10 @@ implementation edit/verify/fix loop in one session, makes premium judgment usage
 bound, and does not distinguish a delegating engineering lead from an ordinary Worker.
 
 The system needs one Root to remain accountable for each outcome while a separate,
-first-class role owns autonomous engineering delivery. It must also keep normal Codex
-execution usage substantially above Claude cognitive-control usage and preserve meaningful
-independent review when the preferred Root and Reviewer can both be Claude.
+first-class role owns autonomous engineering delivery. Its workflow should make normal
+execution usage substantially exceed Root usage—currently expected to map mostly to Codex
+and Claude respectively—and preserve meaningful independent review across replaceable
+providers.
 
 ## Decision
 
@@ -44,6 +45,9 @@ criteria, constraints/non-goals, risk, decided architecture, delegated open ques
 reconnaissance strategy, required tests/evals, required evidence, worktree/base commit,
 budget/human gates, escalation contract and expected report format.
 
+The packet's escalation contract may narrow the standing closed list but may not extend or
+redefine it.
+
 Root re-entry is a closed list:
 
 1. architecture materially changes
@@ -51,9 +55,27 @@ Root re-entry is a closed list:
 3. difficult diagnosis remains unresolved
 4. HIGH-risk independent review is required
 5. deterministic verification cannot resolve uncertainty
+6. execution is blocked by something outside the Execution Lead's authority—a protected
+   human gate, a missing authorization or credential, an exhausted budget or concurrency
+   limit, an unavailable required dependency, or acceptance criteria that are infeasible
+   or mutually contradictory
 
 Everything else—including routine implementation decisions, test failures, refactors,
 tooling problems and local design—is owned by the Execution Lead.
+
+Condition 6 is an authority escalation, not a cognitive re-entry. The Root routes it to a
+human gate or amends the packet without taking over implementation. If unresolved, the
+Lead settles `worker_done --outcome failed` with the blocker and the Root promotes the
+durable task to GitHub Blocked / Needs-Human.
+
+## Orca Run Topology
+
+The Root-owned Run contains the parent Task and Execution Lead Dispatch and remains bound
+to the Root terminal. A Lead that dispatches Workers creates a separate Lead-owned Run
+with `run-create`, records the parent Task and Dispatch IDs in its objective and evidence,
+and never calls `run-use` on the Root-owned Run. Worker questions terminate at the Lead;
+the Lead settles/releases every sub-dispatch before its parent `worker_done`, and the Root
+receives compressed evidence rather than Worker transcripts.
 
 ## Cost and Review Structure
 
@@ -65,12 +87,17 @@ evidence rather than full transcripts or reasoning dumps. The Root uses long
 the Root-micromanagement anti-pattern. Escalations are bounded question/decision exchanges
 and never transfer the implementation loop back to the Root.
 
+These are workflow rules intended to produce execution-heavy usage, not an automated
+enforcement claim. V0 manually records `root_vs_execution_usage_share`; the Platform
+Steward evaluates the rolling window until Controller automation exists.
+
 Independent review means fresh-session context independence. The Reviewer receives the
 original task, acceptance criteria, diff/commit, verification evidence, relevant docs and
 risk, but not Root private reasoning/transcripts, Execution Packet rationale or a
-Root-authored defense. A Root session never reviews its own work. Same-provider fresh
-sessions can retain correlated blind spots, so a HIGH-risk architecture design authored by
-a Claude Root should prefer or add Codex review and record the residual correlation risk.
+Root-authored defense. A Root session never reviews its own work. For HIGH-risk work, the
+reviewer provider must differ from the implementer provider when a capable alternative
+exists; otherwise a human-visible waiver must accept the residual same-provider
+correlation risk.
 
 ## Provider Preferences
 
@@ -80,7 +107,7 @@ Preferences remain replaceable policy, never permanent bindings:
 - Codex: Execution Lead / Engineering Control Plane
 - DeepSeek: well-scoped Execution Worker
 - Claude, then Codex: fresh-session independent review
-- Codex: cross-provider review of a Claude-authored Root architecture design
+- provider different from implementer: HIGH-risk review
 - any capable provider: fallback based on evidence, availability, independence and budget
 
 ## Relationship to ADR-001
@@ -98,7 +125,7 @@ Benefits:
 
 - cognitive judgment and engineering execution have explicit authority boundaries
 - the Execution Lead can delegate without turning every engineering choice into Root work
-- structural usage rules make Root-heavy drift observable and correctable
+- the manually recorded usage metric makes Root-heavy drift observable in V0
 - reviewer context isolation is explicit even when Root and Reviewer share a provider
 
 Costs and residual risks:
@@ -108,8 +135,13 @@ Costs and residual risks:
 - same-provider review can still have model-level correlated blind spots
 - Orca task/dispatch settlement remains necessary for supervised ownership tracking
 
+If an Execution Lead fails mid-flight, the Root owns parent-Dispatch recovery and
+replacement while preserving the worktree and uncommitted work. After the prior terminal
+is proven inactive and ownership is reassigned, a replacement Execution Lead—not the
+Root—owns the resumed edit/verify loop.
+
 ## Verification
 
-Repository policy tests assert provider ordering, the Execution Lead role, the closed
+Repository policy tests assert provider ordering, the Execution Lead role, the closed six
 re-entry list, Execution Packet fields, fresh-session review independence and the preserved
 Orca/Controller/Herdr boundaries.

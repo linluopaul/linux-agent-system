@@ -20,8 +20,10 @@ For independent review:
 - do not provide the Root's private reasoning, transcript or defense
 - never reuse the Root session to review its own work
 
-Same-provider isolation reduces anchoring but not correlated blind spots. Prefer or add
-Codex for cross-provider review of a HIGH-risk Claude-authored Root architecture design.
+Same-provider isolation reduces anchoring but not correlated blind spots. For HIGH-risk
+work, Claude reviews a non-Claude implementation, or a non-Claude provider reviews a
+Claude implementation. If no capable alternative exists, require a human-visible waiver
+accepting the residual correlation risk.
 
 Claude may act in another role when task evidence, capability, availability or provider
 pressure warrants it. These preferences are not permanent role bindings.

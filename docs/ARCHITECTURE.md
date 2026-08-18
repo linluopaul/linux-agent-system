@@ -56,15 +56,15 @@
                       preferred provider: Codex
  implementation plan / repository investigation / code / debug
          tests / verify / iterative fixes / delegation decision
-                     │                         │
-                     │                         ├── provider-internal subagents
-                     ▼
-            Execution Worker
-       preferred provider: DeepSeek
- bounded implementation / search / tests / mechanical refactor
+                     ├── self-do
+                     ├── provider-internal subagents
+                     └── Execution Worker
+                         preferred provider: DeepSeek
+                         bounded implementation / search /
+                         tests / mechanical refactor
 
  Independent Reviewer: fresh context-isolated session/worktree
- preferred Claude, then Codex; Claude-authored Root design prefers Codex
+ HIGH risk: provider differs from implementer, or human-visible waiver
 
  Runtime and durable planes:
  GitHub System of Record ← commits / PRs / issues / policies / evidence
@@ -183,6 +183,14 @@ Orca Orchestration 提供：
 Orchestration；Execution Lead 对自己 dispatch 的 Worker 使用同样的 tracked lifecycle。
 真正的 full handoff 表示 ownership 已转移，原 Root 不再监控，不应伪装成 tracked
 dispatch。
+
+Run coordinator binding 是 per-terminal。Root-owned Run 只由 Root terminal
+coordinate；Execution Lead 不在该 Run 内 `task-create`，也绝不对 Root Run 调用
+`run-use`。Lead 需要 dispatch Worker 时，从自己的 terminal 执行 `run-create`
+建立并 coordinate 独立 Run，在 objective 中记录 parent Task ID 与 parent Dispatch
+ID，然后在该 Run 内 `task-create` / `worker-start`。Lead 在发送 parent
+`worker_done` 前 settle/release 全部 sub-dispatch，并在 compressed evidence 中记录
+Lead Run ID 与 parent IDs。Worker question 终止于 Lead；Root 只看到 Lead 汇总的结果。
 
 #### Local and SSH / connected-environment execution
 
@@ -321,8 +329,9 @@ tests + evals + deterministic checks
         ▼
 reviewable meaningful commit
         │
-        ├── closed Root re-entry only when one of five conditions applies
+        ├── closed Root re-entry only when one of six conditions applies
         ├── HIGH review ──► fresh context-independent Reviewer
+        ├── authority blocker ──► human gate / amended packet / failed outcome
         │
         ▼
 Execution Lead resolves findings / re-verifies / final commit
@@ -352,7 +361,8 @@ GitHub Issue/Kanban/PR durable state
    acceptance，然后创建 Reviewer 可见的 meaningful commit；routine choice 不返回
    Root。
 8. 只有 closed Root re-entry list 中的条件才进行 bounded exchange。HIGH task 必须
-   使用 fresh context-independent session 完成 Review。
+   使用 fresh context-independent session 完成 Review；condition 6 只把 authority
+   blocker 路由到 human gate 或 amended packet，不把 implementation loop 交回 Root。
 9. Execution Lead 解决 implementation 与 blocking findings，再次验证并创建 final
    meaningful commit，然后返回 files、commands、results、findings 和 uncertainty 的
    compressed evidence。
@@ -454,17 +464,29 @@ Execution Lead 负责：
 - 形成 compressed evidence 和 meaningful commit。
 
 Delegation authority 是 Execution Lead 与普通 Worker 的区别。Execution Lead 自主运行到
-acceptance criteria 满足，只能在以下五种情况 re-engage Root：
+acceptance criteria 满足，只能在以下六种情况 re-engage Root：
 
 1. architecture materially changes
 2. acceptance criteria are ambiguous
 3. difficult diagnosis remains unresolved
 4. HIGH-risk independent review is required
 5. deterministic verification cannot resolve uncertainty
+6. execution is blocked by something outside the Execution Lead's authority—a protected
+   human gate, a missing authorization or credential, an exhausted budget or concurrency
+   limit, an unavailable required dependency, or acceptance criteria that are infeasible
+   or mutually contradictory
 
 这是 closed Root re-entry list。Routine implementation choice、test failure、refactor、
 tooling problem 和 local design detail 都由 Execution Lead 解决。Escalation 是一个
 specific question 与一个 specific decision，不把 implementation loop 转回 Root。
+Condition 6 是 authority escalation，不是 cognitive re-entry。Root 只负责把它路由给
+human gate 或修改 Execution Packet；无法解决时，Lead 用带 blocker 的
+`worker_done --outcome failed` settlement，Root 把 durable state 更新为 GitHub
+Blocked / Needs-Human。
+
+Lead dispatch Worker 时创建并 coordinate 自己的 Orca Run，在 objective 和 evidence
+中 durable link parent Task / Dispatch IDs；它不绑定 Root-owned Run。所有 Worker
+question 由 Lead 处理，所有 sub-dispatch 在 parent `worker_done` 前 settle/release。
 
 ### 6.3 Worker
 
@@ -500,9 +522,9 @@ non-blocking。
 
 Reviewer 不接收 Root private reasoning / transcript、Execution Packet rationale 或
 Root 对自身设计的辩护。Root session 不能 review 自己的 work，携带 Root context 的
-session 也不算 independent。同 provider fresh session 可减少 anchoring，但仍有
-correlated blind spots；当 HIGH-risk artifact 是 Root 自己的 architecture design 时，
-优先或增加 cross-provider Reviewer，并记录 residual correlation risk。
+session 也不算 independent。HIGH-risk work 在有 capable alternative 时必须由不同于
+implementer 的 provider review；没有 alternative 时，必须在 human-visible task record
+中保存接受 residual same-provider correlation risk 的明确 waiver。
 
 ### 6.5 Platform Steward
 
@@ -512,6 +534,7 @@ Platform Steward 管系统改进而不是单个 product outcome：
 - retry / failure classes；
 - review yield；
 - cost pressure；
+- `root_vs_execution_usage_share` 和 Root-heavy drift；
 - node utilization；
 - routing / skill / test / Controller improvements；
 - Platform Kanban。
@@ -558,7 +581,7 @@ evidence 覆盖。
 | Execution Lead / Engineering Control Plane | Codex | autonomous engineering delivery |
 | Well-scoped implementation/search/test/mechanical refactor | DeepSeek | preferred Execution Worker |
 | Independent review | Claude, then Codex | fresh context-isolated session |
-| Cross-provider review of Claude-authored Root design | Codex | 降低 provider-level correlation |
+| HIGH-risk review | provider different from implementer | 无 alternative 时需 human-visible waiver |
 | Fallback | any capable provider | 由 capability/availability/budget/evidence 决定 |
 
 路由顺序写入 `.agent/policies/routing.yaml`，风险触发写入
@@ -567,8 +590,10 @@ evidence 覆盖。
 risk-level role key 覆盖同名 default，缺省时继承 default。Controller 记录近似
 provider pressure，不依赖不稳定的精确额度 API。
 
-正常运行必须让 Codex execution usage 显著高于 Claude Root usage。这不是 aspiration，
-而由以下 structural rules 强制：
+正常 operation 的 role-first 目标是 execution usage 显著高于 Root usage；在当前
+provider preferences 下，通常体现为 Codex execution usage 高于 Claude Root usage。
+以下 workflow rules 用于产生这种 asymmetry；V0 不声称 automatic enforcement，而在
+usage 被收集后由 `root_vs_execution_usage_share` 验证：
 
 1. Root reconnaissance 有界，只读取正确制定 Execution Packet 所需内容；为了写 packet
    而阅读整个 codebase 是 anti-pattern。
@@ -579,8 +604,8 @@ provider pressure，不依赖不稳定的精确额度 API。
    findings 和 uncertainty；不提交 full transcript 或 full reasoning dump。
 5. Root 使用 long `check --wait` windows 监督。Frequent status polling、terminal
    reading 或 step-by-step direction 是 **Root micromanagement** anti-pattern。
-6. Escalation 是 bounded exchange：specific question 与 specific decision；不能把
-   implementation loop 转回 Root。
+6. Escalation 是 bounded exchange：specific question 与 specific decision；authority
+   blocker 也只触发 routing / packet amendment，不能把 implementation loop 转回 Root。
 
 至少记录：
 
@@ -628,9 +653,11 @@ HIGH 必须：
 1. required tests / evals 实际执行；
 2. independent Reviewer 使用 fresh session 和独立 worktree / terminal，与 Root 和
    implementer 保持 context isolation；
-3. blocking findings 解决；
-4. remaining uncertainty 显式报告；
-5. 必要 human gate 保持。
+3. Reviewer provider 与 implementer provider 不同；如无 capable alternative，必须有
+   human-visible residual-risk waiver；
+4. blocking findings 解决；
+5. remaining uncertainty 显式报告；
+6. 必要 human gate 保持。
 
 Review packet 只能提供 original task、acceptance criteria、diff / commit、
 verification evidence、relevant docs 和 risk level。不得提供 Root private reasoning、
@@ -639,12 +666,8 @@ session cannot review itself；任何携带 Root context 的 session 都不满�
 independence。
 
 同 provider 的 fresh session 可以减少 anchoring，但不能消除 model-level correlated
-blind spots。当 HIGH-risk artifact 本身是 Root authored architecture design 时，优先
-使用或增加 cross-provider independent Reviewer（Claude Root 时优先 Codex），并在
-task report 中记录 residual correlation risk。
-
-本任务改变 Controller safety boundary，因此即使主要是 docs/config，也采用独立
-architecture review。
+blind spots，因此只在没有 capable alternative 且 human-visible record 明确接受
+residual correlation risk 时，waiver 才能代替 cross-provider review。
 
 ### 8.4 Source of truth
 
@@ -728,6 +751,9 @@ Architecture decisions 已由 Root 决定，Execution Lead 不自动 reopen。Op
 delegated 明确哪些判断由 Lead 自主作出；reconnaissance strategy 说明从哪里开始查，
 而不是由 Root 代替 Lead 读取整个 repository。
 
+`ESCALATION CONTRACT` 只能 narrow standing closed list，例如删除 task 不可能触发的
+condition 或指定 route；不能增加、重定义或绕过六个 standing conditions。
+
 Execution Lead → Execution Worker assignment 至少包含：
 
 ```text
@@ -762,23 +788,43 @@ reasoning、Root private reasoning / transcript、Execution Packet rationale 或
 常见 coordinator lifecycle：
 
 ```text
-Root Run
- └── Task
-      └── supervised Dispatch
-           └── Execution Lead terminal
-                ├── optional Lead-owned Worker sub-dispatch
-                ├── closed-list question / escalation
-                └── worker_done with compressed evidence
+Root-owned Run                         Lead-owned Run
+coordinator: Root terminal             coordinator: Execution Lead terminal
+ └── parent Task                        objective links parent Task + Dispatch IDs
+      └── parent Dispatch               └── Worker Task
+           └── Execution Lead terminal       └── Worker Dispatch
+                ├── closed-list exchange          └── Worker terminal
+                └── parent worker_done                 └── worker_done to Lead
+                     with compressed evidence
 ```
 
 Root 先 create/bind Run，再 create Task，之后使用 version-matched
 `worker-start` 或低层 dispatch 把 Execution Packet 交给 Execution Lead。等待期间使用
 long structured `check --wait` windows，不做固定 sleep/poll loop、频繁 terminal read
-或 step-by-step direction。Execution Lead 如果 dispatch Execution Worker，必须拥有并
-settle 该 sub-dispatch，不把 routine Worker coordination 交回 Root。
+或 step-by-step direction。
+
+Installed Orca 1.4.184 的 version-matched guide 与 CLI help 验证了以下 Lead topology：
+
+```text
+ORCA orchestration run-create --objective \
+  "Execution sub-run for parent Task <task_id>, Dispatch <dispatch_id>" --json
+ORCA orchestration task-create --run <lead_run_id> --spec "<bounded worker task>" --json
+ORCA orchestration worker-start --task <worker_task_id> ... --json
+ORCA orchestration check --wait --types worker_done,escalation,question ... --json
+ORCA orchestration worker-release --dispatch <worker_dispatch_id> --json
+ORCA orchestration check --ack <delivery_id> ... --json
+```
+
+`run-create` 从 Execution Lead terminal 创建并绑定 Lead-owned Run；`task-create --run`
+把 Worker Task 放入该 Run。Run coordinator binding 是 per-terminal，因此 Lead 不在
+Root-owned Run 中 `task-create`，也不对 Root-owned Run 调用 `run-use`，否则会 fence
+Root coordinator。Lead 处理 Worker question、settle/release 每个 sub-dispatch，并在
+parent `worker_done` 前报告 Lead Run ID、parent Task ID、parent Dispatch ID 和
+compressed Worker evidence。Root 不直接消费 Worker transcript 或 Worker inbox。
 
 `check` 返回 oldest FIFO Delivery，并持续 replay 同一 batch，直到 coordinator 使用
-`check --ack <delivery_id>`。Root 必须先处理 Delivery 内每条 message；对每个有效
+`check --ack <delivery_id>`。每个 Run 的 coordinator 必须先处理 Delivery 内每条
+message；对每个有效
 `worker_done`，在 acknowledgment 前选择 terminal 的下一 owner：
 
 - 立即把同一个 agent terminal 转移到 follow-up Dispatch；或
@@ -794,6 +840,13 @@ Execution Lead 在 acceptance 满足或 definitive blocker 前保持 edit/verify
 不是 transcript 或 reasoning dump。HIGH-risk review required 是 closed re-entry
 condition：Root 提供 bounded review decision / findings 后，implementation fix loop 仍由
 Execution Lead 完成。
+
+如果 Execution Lead mid-flight failure，Root 作为 parent Run coordinator 负责确认
+parent Dispatch 状态、执行 current guide 的 stop/retry recovery 并启动 replacement
+Execution Lead。Root 不进入 worktree 修改实现；Orca 不因 terminal stop 删除 worktree，
+必须保留 worktree 与 uncommitted work。只有 prior Lead terminal 已被证明 inactive 且
+ownership 明确 reassigned 后，replacement Execution Lead 才接管原 worktree，或从
+last commit / preserved artifact 在 conflict-free worktree 恢复，并继续 edit/verify loop。
 
 ### 11.2 Full handoff
 
@@ -979,10 +1032,25 @@ Orca workspace status 是实时 UI 辅助，不是 GitHub Kanban 的最终 truth
 - human-gate wait；
 - backup/recovery checks。
 
-`root_vs_execution_usage_share` 由 Platform Steward 用来发现 Root-heavy drift。正常
-pattern 应让 Codex execution usage 显著高于 Claude Root usage；持续反向变化应触发对
-packet scope、Root reconnaissance、polling frequency 和 implementation-loop ownership
-的检查。
+`root_vs_execution_usage_share` 是每个 completed task 的 two-component percentage：
+
+- `root_usage_units`：Root session 的 provider-reported approximate input + output
+  tokens；不含 Reviewer；
+- `execution_usage_units`：Execution Lead、provider-internal subagents 和 Execution
+  Workers 的相同 token unit 总和；
+- denominator：`root_usage_units + execution_usage_units`；
+- unit：percentage points，
+  `root_share = 100 * root_usage_units / denominator`，
+  `execution_share = 100 * execution_usage_units / denominator`。
+
+如果 provider 没有可审计的 token estimate，值标为 `unknown`，不得用猜测制造 ratio。
+V0 由 Root 在 task settlement 时从 provider / harness receipts 手工记录到
+`.agent/runs/<task>/metrics.yaml`，状态为 **manually recorded, not yet automated**；
+Platform Steward 验证 per-task record，并聚合最近 20 个有值的 completed tasks。Rolling
+window 的 `execution_share >= 65%` 是当前 drift target；低于 threshold 触发对 packet
+scope、Root reconnaissance、polling frequency 和 implementation-loop ownership 的
+检查。当前 provider preferences 通常使 execution 体现为 Codex、Root 体现为 Claude，
+但 metric invariant 始终按 role 计算。
 
 反复 failure 应优先晋升为：
 
