@@ -38,7 +38,7 @@ Separate four axes:
 provider-role binding. Pi under Orca launches through `orca orchestration worker-start`;
 choosing a harness never bypasses `worker-start`.
 
-Two Execution Lead harness classes replace the single "Codex Execution Lead":
+Two Execution Lead harness classes replace the single Codex-as-Execution-Lead role binding:
 
 - **Pi Standard/Fast Lead** — default for well-scoped, lower-complexity, LOW/MEDIUM work.
 - **Codex Premium Lead** — for difficult engineering reasoning, complex repository

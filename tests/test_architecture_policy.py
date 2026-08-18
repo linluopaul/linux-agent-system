@@ -30,6 +30,75 @@ def fenced_code_blocks(document: str) -> list[str]:
     return re.findall(r"```[^\n]*\n(.*?)```", document, flags=re.DOTALL)
 
 
+# ---------------------------------------------------------------------------
+# Defect-class enforcement: the architecture must never bind a provider/model-pool
+# name to an agent role anywhere in LIVE text (not merely in one quoted section).
+# The historical decision records ADR-001/002/003 are explicitly excluded by path
+# below; everything else on disk counts as live architecture text.
+# ---------------------------------------------------------------------------
+# Provider/model-pool names (pool names, not HARNESS class names). Harness classes
+# are named claude_code / codex_cli / pi and are deliberately NOT in this set, so
+# legitimate harness-class vocabulary is expressible. "Pi" is a harness, not a pool,
+# and is likewise absent.
+PROVIDER_NAME_RE = r"(?:claude|codex|deepseek|gemini|kimi|minimax|ark|volcengine)"
+# Role nouns that must never be directly qualified by a provider name.
+ROLE_NOUN_RE = (
+    r"(?:root|cognitive control plane|execution lead|engineering control plane|"
+    r"execution worker|reviewer)"
+)
+# Defect class patterns, mirroring the forms the re-review reproduced:
+#   "<Provider> <Role>"            (immediate binding, e.g. "Codex Execution Lead")
+#   "default ... agent: <Provider>"  (e.g. "default engineering agent: Codex (all tasks)")
+#   "preferred provider: <Provider>"
+#   "<Role> ... provider: <Provider>"
+# The immediate binding requires whitespace (never an underscore), so the HARNESS names
+# claude_code / codex_cli never match, and any intervening QUALIFIER (Premium,
+# Standard/Fast, "Claude Code") breaks the role adjacency, which is what preserves the
+# legitimate harness-class phrases "Codex Premium escalation / Lead" and "Pi Standard/Fast".
+PROVIDER_ROLE_BINDING_RE = re.compile(
+    r"\b" + PROVIDER_NAME_RE + r"\s+" + ROLE_NOUN_RE + r"\b", flags=re.IGNORECASE
+)
+DEFAULT_AGENT_BINDING_RE = re.compile(
+    r"\bdefault\b[^.\n]{0,60}?\bagent\b[^.\n]{0,12}?\s*[:=]\s*"
+    + PROVIDER_NAME_RE + r"\b",
+    flags=re.IGNORECASE,
+)
+PREFERRED_PROVIDER_BINDING_RE = re.compile(
+    r"\bpreferred provider\b[^.\n]{0,8}?\s*[:=]\s*" + PROVIDER_NAME_RE + r"\b",
+    flags=re.IGNORECASE,
+)
+ROLE_PROVIDER_BINDING_RE = re.compile(
+    ROLE_NOUN_RE + r"\b[^.\n]{0,60}?provider\b[^.\n]{0,12}?\s*[:=]\s*"
+    + PROVIDER_NAME_RE + r"\b",
+    flags=re.IGNORECASE,
+)
+PROVIDER_ROLE_BINDINGS = (
+    ("provider-role", PROVIDER_ROLE_BINDING_RE),
+    ("default-agent", DEFAULT_AGENT_BINDING_RE),
+    ("preferred-provider", PREFERRED_PROVIDER_BINDING_RE),
+    ("role-provider", ROLE_PROVIDER_BINDING_RE),
+)
+
+
+def live_architecture_documents() -> list[Path]:
+    """Every live md/yaml file that documents current architecture or policy.
+
+    Genuinely historical decision records (ADR-001/002/003) are excluded by path so
+    their retro-recorded provider preferences do not trip the live invariant.
+    """
+    historical = {
+        ROOT / "docs" / "decisions" / "ADR-001-orca-first-execution-plane.md",
+        ROOT / "docs" / "decisions" / "ADR-002-cognitive-and-engineering-control-planes.md",
+        ROOT / "docs" / "decisions" / "ADR-003-lead-worker-git-integration-contract.md",
+    }
+    paths = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "CLAUDE.md"]
+    for directory in (ROOT / "docs", ROOT / ".agent"):
+        for path in directory.rglob("*"):
+            if path.is_file() and path.suffix in {".md", ".yaml", ".yml"} and path not in historical:
+                paths.append(path)
+    return paths
+
+
 WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
     "AGENTS.md",
     ".agent/roles/execution-lead.md",
@@ -974,6 +1043,34 @@ class ArchitecturePolicyTests(unittest.TestCase):
         # provider binding, and the document is actually read (not asserted from memory).
         self.assertIn("Pi Standard/Fast default → Codex Premium escalation", architecture)
         self.assertIn("Claude Code harness default", architecture)
+
+    def test_no_live_provider_as_role_binding_anywhere(self) -> None:
+        """The no-provider-as-role invariant holds across ALL live architecture text.
+
+        Earlier B1 assertions pinned literal strings ("preferred provider:",
+        "DeepSeek Execution Worker"), so a freshly-worded provider-as-role binding such
+        as "default engineering agent: Codex (all tasks)" slipped straight through green
+        CI. This test targets the defect CLASS: it scans every live document for a
+        provider/model-pool name bound to a role noun in any of the reproduced forms.
+        Harness-class vocabulary remains expressible because harness names are
+        underscore-connected (claude_code, codex_cli; "Pi" is a harness, not a pool)
+        and an intervening qualifier (Premium / Standard/Fast / "Claude Code") breaks
+        the adjacency, which is the very distinction the allowlist exists to preserve.
+        """
+        failures = []
+        for path in live_architecture_documents():
+            content = path.read_text(encoding="utf-8", errors="replace")
+            for name, pattern in PROVIDER_ROLE_BINDINGS:
+                for match in pattern.finditer(content):
+                    snippet = content[
+                        max(0, match.start() - 40): match.end() + 40
+                    ].replace("\n", " ")
+                    failures.append(f"{name} binding in {path.relative_to(ROOT)}: {snippet!r}")
+        if failures:
+            self.fail(
+                "Live architecture text binds a provider name to an agent role:\n"
+                + "\n".join(failures)
+            )
 
     def test_root_selects_execution_lead_harness(self) -> None:
         routing = self.load_yaml(".agent/policies/routing.yaml")

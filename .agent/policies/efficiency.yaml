@@ -13,6 +13,10 @@
 # The efficiency principles below express the policy. Terse reporting is a native
 # architecture principle that stands alone; it is not provided by, and does not depend on,
 # any third-party skill, extension or dependency.
+#
+# Always-loaded context (AGENTS.md or the equivalent) holds cross-cutting invariants and
+# routing essentials, not every detailed workflow; detailed procedures live in load-on-demand
+# policies, skills, runbooks and ADRs.
 principles:
   - use_the_cheapest_capable_resource
   - prefer_deterministic_tools_tests_and_evals_before_model_calls

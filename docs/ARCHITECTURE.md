@@ -1468,9 +1468,9 @@ git clone
 
 ```text
 Issue
-→ Orca-managed Claude Root / Cognitive Control Plane
+→ Orca-managed Root / Cognitive Control Plane (Claude Code harness / capable pool)
 → one bounded Execution Packet
-→ supervised Codex Execution Lead / Engineering Control Plane
+→ supervised Execution Lead / Engineering Control Plane (Pi Standard/Fast default → Codex Premium escalation)
 → optional Lead-owned low-cost pool Execution Worker
 → Execution Lead tests/evals/fix loop
 → required fresh context-independent review
