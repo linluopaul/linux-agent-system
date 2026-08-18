@@ -51,7 +51,7 @@ the Execution Packet.
 ## Efficiency and terse reporting
 
 Efficiency and terse reporting are native architecture principles defined in
-`.agent/policies/efficiency.yaml`. Ten principles cover cheapest-capable-resource,
+`.agent/policies/efficiency.yaml`. The efficiency principles cover cheapest-capable-resource,
 deterministic-first, execution-volume-over-root and low-cost-over-premium targets, and
 never narrating routine tool usage. Agent-to-agent reports use the terse
 `STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT` block. Terseness must not apply
@@ -125,7 +125,7 @@ Costs and residual risks:
 Repository policy tests assert that Pi is a harness and not a model or provider, that the
 Worker role is not bound to DeepSeek, that Codex is a premium escalation rather than the
 mandatory Execution Lead, that the Root selects the Execution Lead harness, that the
-capability catalog and the new packet fields exist, that the ten efficiency principles and
+capability catalog and the new packet fields exist, that the efficiency principles and
 the terse-reporting clarity overrides exist, that Caveman is not a dependency, that the
 execution-cost metrics replace the provider-usage objective, that efficiency policy does
 not weaken HIGH-risk guardrails, and that the validated lifecycle invariants survive.

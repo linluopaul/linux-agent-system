@@ -10,7 +10,7 @@
 # owned by risk.yaml and the Verification / Review sections. Efficiency never overrides
 # acceptance criteria or HIGH-risk safeguards.
 
-# Ten efficiency principles express the policy. Terse reporting below is a native
+# The efficiency principles below express the policy. Terse reporting is a native
 # architecture principle that stands alone; it is not provided by, and does not depend on,
 # any third-party skill, extension or dependency.
 principles:
@@ -25,6 +25,7 @@ principles:
   - report_compressed_evidence_not_transcripts_or_reasoning_dumps
   - read_by_section_for_large_documents_and_do_not_retain_transcripts
   - reasoning_effort_is_not_a_token_savings_lever
+  - minimize_always_loaded_repository_instructions
 
 # Approved cost levers. Reasoning effort is NOT a token-savings lever; it is explicitly
 # excluded from this list because it is a correctness parameter, not a cost parameter.
@@ -46,10 +47,6 @@ cost_levers:
 profiles:
   standard-low-cost:
     reasoning: high
-    report_style: terse
-    deterministic_first: true
-  typical:
-    reasoning: standard
     report_style: terse
     deterministic_first: true
   premium:

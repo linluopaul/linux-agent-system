@@ -23,7 +23,10 @@ The Root selects the Execution Lead harness class per task; it is not a permanen
 
 ## Role support
 
-- **Root / Cognitive Control Plane** — Pi with a capable pool.
+- **Root / Cognitive Control Plane** — believed default is the **Claude Code harness** with
+  a high-capability pool; Pi with a capable pool remains an acceptable alternative.
+  Claude Code remains the preferred Root harness; this is a preference, not a permanent
+  binding.
 - **Execution Lead / Engineering Control Plane** — Pi Standard/Fast by default; the Root
   escalates to Codex Premium for difficult engineering.
 - **Execution Worker** — Pi with a low-cost pool for well-scoped work.

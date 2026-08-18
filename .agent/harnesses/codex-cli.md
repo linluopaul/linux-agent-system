@@ -1,6 +1,6 @@
 # Codex CLI Harness
 
-Codex CLI is a **harness**, not a fixed model binding. It runs the Codex model and is the
+Codex CLI is a **harness**, not bound to any role. It runs the Codex model and is the
 **Codex Premium Execution Lead** harness class.
 
 It is **not** the mandatory Execution Lead for every task. The Root selects the Execution

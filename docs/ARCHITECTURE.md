@@ -45,7 +45,7 @@
                                     │
                                     ▼
                  Root / Cognitive Control Plane
-                     preferred provider: Claude
+              Claude Code harness default / capable pool
  requirements / goal / architecture / acceptance / risk / constraints
  reconnaissance strategy / Execution Packet / ambiguity / escalation
                          final outcome accountability
@@ -53,13 +53,13 @@
                      one bounded Execution Packet
                                     ▼
               Execution Lead / Engineering Control Plane
-                      preferred provider: Codex
+              Pi Standard/Fast default → Codex Premium escalation
  implementation plan / repository investigation / code / debug
          tests / verify / iterative fixes / delegation decision
                      ├── self-do
                      ├── provider-internal subagents
                      └── Execution Worker
-                         preferred provider: DeepSeek
+                         low-cost pool (e.g. deepseek), not bound to a pool
                          bounded implementation / search /
                          tests / mechanical refactor
 
@@ -310,7 +310,7 @@ risk / budget / node / human gates
         │
         ▼
 Root / Cognitive Control Plane
-(preferred provider: Claude)
+(Claude Code harness default / capable pool)
 bounded reconnaissance + architecture + acceptance
         │
         ▼
@@ -318,10 +318,10 @@ one Execution Packet through supervised Orca Dispatch
         │
         ▼
 Execution Lead / Engineering Control Plane
-(preferred provider: Codex)
+(Pi Standard/Fast default → Codex Premium escalation)
 investigate / plan / code / debug / delegate / verify / fix
         │
-        ├── optional DeepSeek Execution Worker
+        ├── optional low-cost Execution Worker (not bound to any pool)
         │
         ▼
 tests + evals + deterministic checks
@@ -806,7 +806,7 @@ ADR-004 保持一致。
 
 ### 7.3 efficiency 与 terse reporting
 
-`.agent/policies/efficiency.yaml` 记录 10 条 efficiency principles（含
+`.agent/policies/efficiency.yaml` 列出 efficiency principles（含
 never narrate routine tool usage）。Agent-to-agent report 使用 terse block
 `STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT`。Clarity override：terse
 不适用于 architecture decisions、acceptance criteria、security warnings、destructive
@@ -1471,7 +1471,7 @@ Issue
 → Orca-managed Claude Root / Cognitive Control Plane
 → one bounded Execution Packet
 → supervised Codex Execution Lead / Engineering Control Plane
-→ optional Lead-owned DeepSeek Execution Worker
+→ optional Lead-owned low-cost pool Execution Worker
 → Execution Lead tests/evals/fix loop
 → required fresh context-independent review
 → compressed evidence + commit + Root-owned GitHub state

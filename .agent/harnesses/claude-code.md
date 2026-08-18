@@ -1,6 +1,6 @@
 # Claude Code Harness
 
-Claude Code is a **harness**, not a fixed model binding. It runs the Claude model and is a
+Claude Code is a **harness**, not bound to any role. It runs the Claude model and is a
 premium (higher-capability) harness class.
 
 Used selectively for:

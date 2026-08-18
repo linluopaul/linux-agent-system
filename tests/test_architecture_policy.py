@@ -164,7 +164,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn(pool, routing["model_pools"])
 
         defaults = routing["defaults"]
-        self.assertEqual("pi", defaults["preferred_harness"]["root"])
+        self.assertEqual("claude_code", defaults["preferred_harness"]["root"])
         self.assertEqual("pi", defaults["preferred_harness"]["execution_lead"])
         self.assertEqual("pi", defaults["execution_lead"]["standard_harness"])
         self.assertEqual(
@@ -198,6 +198,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "codex_is_a_premium_execution_lead_escalation_not_a_mandatory_binding",
             "root_reentry_is_limited_to_the_closed_escalation_list",
             "do_not_permanently_bind_provider_to_role",
+            "claude_is_default_root_preference",
         ):
             self.assertIn(principle, principles)
         self.assertNotIn(
@@ -940,6 +941,9 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "deepseek_is_preferred_for_well_scoped_worker_tasks",
             routing["principles"],
         )
+        architecture = read("docs/ARCHITECTURE.md")
+        self.assertNotIn("preferred provider", architecture)
+        self.assertNotIn("DeepSeek Execution Worker", architecture)
 
     def test_codex_is_premium_escalation_not_mandatory_lead(self) -> None:
         routing = self.load_yaml(".agent/policies/routing.yaml")
@@ -964,6 +968,12 @@ class ArchitecturePolicyTests(unittest.TestCase):
         adr = normalize(read("docs/decisions/ADR-004-role-harness-model-capability-separation.md"))
         self.assertIn("Pi Standard/Fast Lead", adr)
         self.assertIn("Codex Premium Lead", adr)
+        architecture = read("docs/ARCHITECTURE.md")
+        self.assertNotIn("preferred provider: Codex", architecture)
+        # Live architecture diagrams express ROLE + HARNESS CLASS, not a per-role
+        # provider binding, and the document is actually read (not asserted from memory).
+        self.assertIn("Pi Standard/Fast default → Codex Premium escalation", architecture)
+        self.assertIn("Claude Code harness default", architecture)
 
     def test_root_selects_execution_lead_harness(self) -> None:
         routing = self.load_yaml(".agent/policies/routing.yaml")
@@ -1031,6 +1041,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "prefer_deterministic_tools_tests_and_evals_before_model_calls",
             "never_narrate_routine_tool_usage",
             "use_terse_structured_agent_to_agent_reporting",
+            "minimize_always_loaded_repository_instructions",
         ):
             self.assertIn(principle, principles)
 
@@ -1054,7 +1065,10 @@ class ArchitecturePolicyTests(unittest.TestCase):
         agents = read("AGENTS.md")
         self.assertIn("STATUS / CHANGED / VERIFY / COMMIT / BLOCKERS /", agents)
         self.assertIn("never narrate routine tool usage", agents)
-        self.assertIn("clarity", read("docs/ARCHITECTURE.md").lower())
+        architecture = read("docs/ARCHITECTURE.md")
+        # Assert the specific clarity-override statement, not a bare substring that
+        # could match unrelated text.
+        self.assertIn("Clarity override", architecture)
 
     def test_caveman_is_not_a_dependency(self) -> None:
         # Caveman must not be a declared dependency in any manifest / requirements /
@@ -1139,11 +1153,13 @@ class ArchitecturePolicyTests(unittest.TestCase):
     def test_reasoning_effort_is_not_a_token_savings_lever(self) -> None:
         efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
 
-        # No efficiency profile sets reduced/low reasoning.
-        for profile in efficiency["profiles"].values():
-            self.assertNotIn(
-                profile.get("reasoning"), ("reduced", "low"), profile
-            )
+        # Every efficiency profile keeps HIGH reasoning effort; no profile may pair a
+        # low-cost dispatch with below-high reasoning. The `typical` (standard-effort)
+        # profile was removed to close the residual token-saving hole. Reasoning effort
+        # is a correctness parameter, not a cost lever.
+        self.assertNotIn("typical", efficiency["profiles"])
+        for name, profile in efficiency["profiles"].items():
+            self.assertEqual("high", profile.get("reasoning", ""), name)
 
         # efficiency.yaml names reasoning/thinking effort as excluded from cost levers.
         self.assertIn(

@@ -4,4 +4,5 @@
 
 ## Claude-specific guidance
 
-See `.agent/providers/claude.md`.
+See `.agent/providers/claude.md` (pool profile) and `.agent/harnesses/claude-code.md`
+(harness class).

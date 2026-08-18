@@ -156,8 +156,9 @@ dispatch and reports compressed evidence rather than transcripts or reasoning du
 The Execution Lead owns implementation planning, repository investigation, coding,
 debugging, tests/verification, iterative fixes and the delegation decision. It may solve
 directly, use provider-internal subagents, or create and settle Orca sub-dispatches.
-Prefer DeepSeek for well-scoped implementation, search, test generation and mechanical
-refactoring when a configured launcher is available. An Execution Worker has no delegation
+Prefer a low-cost pool (e.g. DeepSeek) for well-scoped implementation, search, test
+generation and mechanical refactoring when a configured launcher is available; the Worker
+role is not bound to any one pool. An Execution Worker has no delegation
 authority and routes routine questions to the Lead, not the Root. Agent IDs are
 installation-specific; inspect the runtime rather than guessing an ID.
 

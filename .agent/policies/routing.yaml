@@ -34,10 +34,12 @@ model_pools:
   - gemini
 
 # Role -> default harness class preferences. The Root selects the Execution Lead harness
-# per task; Pi Standard/Fast is the default and Codex is the premium escalation.
+# per task; Pi Standard/Fast is the default Execution Lead and Codex is the premium
+# escalation. Claude Code is the preferred default Root / Cognitive Control Plane harness
+# with a high-capability pool; none of these are permanent role bindings.
 defaults:
   preferred_harness:
-    root: pi
+    root: claude_code
     execution_lead: pi
     specialist: pi
     reviewer: pi
@@ -63,14 +65,14 @@ work_preferences:
 risk:
   low:
     preferred_harness:
-      root: pi
+      root: claude_code
       execution_lead: pi
       worker: pi
     independent_review: false
 
   medium:
     preferred_harness:
-      root: pi
+      root: claude_code
       execution_lead: pi
       worker: pi
     independent_review: conditional
@@ -99,3 +101,4 @@ principles:
   - preserve_premium_capacity_for_high_value_reasoning
   - allow_model_pool_fallback
   - do_not_permanently_bind_provider_to_role
+  - claude_is_default_root_preference
