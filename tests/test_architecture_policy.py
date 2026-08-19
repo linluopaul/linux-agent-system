@@ -636,7 +636,7 @@ def _harness_assignment_claims_on_text(
     findings: list[tuple[str, str]] = []
     for binder in _HARNESS_ASSIGN_BINDERS:
         pattern = re.compile(
-            rf"\b{re.escape(binder)}\b[ \t]+(?:the\s+|a\s+|an\s+)?"
+            rf"\b{re.escape(binder)}\b\s+(?:the\s+|a\s+|an\s+)?"
             rf"(?P<roles>{_ROLE_TOKEN_ALT}(?:[ \t]*[,，、and&]+\s*{_ROLE_TOKEN_ALT})*)",
             re.IGNORECASE,
         )
