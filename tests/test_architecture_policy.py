@@ -410,6 +410,18 @@ ROLE_CLAIM_TOKENS = {
     "worker": ["execution worker", "worker"],
 }
 
+# v2.1.1 F4: a harness file documents exactly ONE harness, so the subject of an
+# 'assigned to <Role>' / 'used for <Role> work' sentence in a harness file IS that file's
+# harness. The v2.1 cross-check missed pi.md's false Root claim precisely because the claim
+# was harness-first ('Pi is assigned to Root ... work'), the reverse of the four role-first
+# shapes it models. This map pins which harness a harness file is about so the F4 guard can
+# resolve a harness-first claim to a (harness, role) pair deterministically.
+HARNESS_FILE_TO_KEY = {
+    ".agent/harnesses/pi.md": "pi",
+    ".agent/harnesses/claude-code.md": "claude_code",
+    ".agent/harnesses/codex-cli.md": "codex_cli",
+}
+
 
 def _harness_spelling_map(harness_keys: list[str]) -> dict[str, str]:
     """Map every textual spelling of a policy harness key back to that key.
@@ -589,6 +601,83 @@ def _role_harness_claims(path: Path, spelling_to_key) -> list[tuple[str, str, st
         for role_key, harness_key, snippet in _prose_claims(sentence, spelling_to_key):
             claims.append((role_key, harness_key, "prose", snippet))
     return claims
+
+
+# Sorted alternation of every recognisable role-noun spelling, used by the F4
+# harness-first assignment scan below.
+_ROLE_TOKEN_ALT = _alternation(
+    sorted(
+        {token for tokens in ROLE_CLAIM_TOKENS.values() for token in tokens},
+        key=len,
+        reverse=True,
+    )
+)
+
+# The binding forms the two harness-first role-assignment defects used-and-closed by F4.
+# Deliberately narrow: only these exact binders are checked, never generic 'for'/
+# 'default ... for', so pointer-style 'per routing.yaml Pi is the default harness for
+# <Role>' sentences (which legitimately describe the policy default) never trip the guard.
+_HARNESS_ASSIGN_BINDERS = ("assigned to", "used for")
+
+
+def _harness_assignment_claims_on_text(
+    text: str, spelling_to_key, subject_harness: str
+) -> list[tuple[str, str]]:
+    """Harness-first '<H> is assigned to <Role> ...' / '<H> used for <Role> ... work' claims.
+
+    A harness file is about one harness, so the subject of an 'assigned to' / 'used for ...
+    work' sentence is resolved to the file's harness (passed as ``subject_harness``). We
+    match only the exact binder forms the F1 defect used and require the role noun(s)
+    immediately after the binder, so conditional hedges ('used in other roles ... only
+    when') and pointer-style references to routing.yaml never match. Returns a list of
+    (role_key, snippet) pairs.
+    """
+    text = strip_historical_escape_hatch(text)
+    findings: list[tuple[str, str]] = []
+    for binder in _HARNESS_ASSIGN_BINDERS:
+        pattern = re.compile(
+            rf"\b{re.escape(binder)}\b[ \t]+(?:the\s+|a\s+|an\s+)?"
+            rf"(?P<roles>{_ROLE_TOKEN_ALT}(?:[ \t]*[,，、and&]+\s*{_ROLE_TOKEN_ALT})*)",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            segment = match.group("roles")
+            roles = {
+                role
+                for role, tokens in ROLE_CLAIM_TOKENS.items()
+                for token in tokens
+                if re.search(
+                    rf"(?<![\w-])\b{re.escape(token)}\b(?:-(?![ \t]))*(?!\w)",
+                    segment,
+                    re.IGNORECASE,
+                )
+            }
+            for role in sorted(roles):
+                findings.append((role, match.group(0)[:90]))
+    return findings
+
+
+def _file_harness_assignment_claims(path: Path, spelling_to_key) -> list[tuple[str, str, str]]:
+    """The harness-first 'assigned to/used for <Role>' claims in ONE harness file.
+
+    Returns (role_key, harness_key, snippet) triples where harness_key is the harness the
+    file documents (its own harness), enabling a direct check against routing.yaml's
+    allowed/default harness for that role. Non-harness files and files whose subject
+    harness the map does not know return no claims.
+    """
+    rel = str(path.relative_to(ROOT))
+    file_harness_key = HARNESS_FILE_TO_KEY.get(rel)
+    if file_harness_key is None:
+        return []
+    raw = strip_historical_escape_hatch(
+        path.read_text(encoding="utf-8", errors="replace")
+    )
+    return [
+        (role, file_harness_key, snippet)
+        for role, snippet in _harness_assignment_claims_on_text(
+            raw, spelling_to_key, file_harness_key
+        )
+    ]
 
 
 WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
@@ -2045,6 +2134,93 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 "Live role->harness claim(s) contradict routing.yaml "
                 "defaults.preferred_harness:\n" + "\n".join(failures)
             )
+
+    def test_harness_files_cannot_claim_role_assignment_contradicting_policy(self) -> None:
+        """F1/F4 guard: a harness file may not use the harness-first prose forms 'assigned
+        to <Role>' or 'used for <Role> work' to claim a role assignment that routing.yaml
+        does not default/prefer that harness for.
+
+        The F1 defect is exactly the shape this guard closes: pi.md claimed Pi 'is assigned
+        to Root, Reviewer, Worker and Specialist work' even though routing.yaml sets
+        `defaults.preferred_harness.root: claude_code`. The v2.1 role-first cross-check
+        (test_live_role_harness_claims_agree_with_policy) missed it because the claim is
+        harness-first - the reverse of the four role-first shapes it models. This guard
+        closes only that named prose form and never the pointer-style 'per routing.yaml'
+        sentences.
+        """
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        defaults = routing["defaults"]
+        preferred = defaults["preferred_harness"]
+        allowed = {role: [preferred[role]] for role in preferred}
+        premium = defaults.get("execution_lead", {}).get("premium_escalation_harness")
+        if premium and premium not in allowed["execution_lead"]:
+            allowed["execution_lead"].append(premium)
+        spelling_to_key = _harness_spelling_map(list(routing["harnesses"].keys()))
+
+        # The guard MUST fail on the exact pre-fix pi.md claim (mutation (a), also covered
+        # in the scratch-checkout bar) and pass on the corrected text.
+        pre_fix = (
+            "Per that file Pi is the standard Execution Lead harness class and is "
+            "assigned to Root, Reviewer, Worker and Specialist work where a cheap "
+            "low-cost harness fits."
+        )
+        self.assertTrue(
+            _harness_assignment_claims_on_text(pre_fix, spelling_to_key, "pi"),
+            "F4 guard must catch the pre-fix 'assigned to Root' claim",
+        )
+        corrected = (
+            "Per that file Pi is the standard Execution Lead harness class and is the "
+            "default harness for Reviewer, Worker, Specialist and Platform Steward work; "
+            "the Root default harness is Claude Code (root: claude_code), not Pi."
+        )
+        self.assertEqual(
+            [],
+            _harness_assignment_claims_on_text(corrected, spelling_to_key, "pi"),
+            "false positive on corrected pi.md role-routing prose",
+        )
+
+        failures = []
+        for path in (ROOT / ".agent" / "harnesses").glob("*.md"):
+            for role_key, harness_key, snippet in _file_harness_assignment_claims(
+                path, spelling_to_key
+            ):
+                if harness_key not in allowed.get(role_key, []):
+                    failures.append(
+                        f"{path.relative_to(ROOT)} claims harness '{harness_key}' is "
+                        f"assigned/used for role '{role_key}' but routing.yaml "
+                        f"defaults.preferred_harness allows "
+                        f"{sorted(allowed.get(role_key, []))} :: {snippet!r}"
+                    )
+        if failures:
+            self.fail(
+                "Live harness-first role-assignment claim contradicts routing.yaml:\n"
+                + "\n".join(failures)
+            )
+
+    def test_skill_preserves_existing_worktree_reuse_invariant(self) -> None:
+        """v2.1.1 F2: the guarded worktree-reuse invariant must live at its canonical home
+        in the writable-delegation Skill, stated independently of any version-specific flag
+        mechanics.
+
+        This invariant survived only in the ORCA_WORKFLOW runbook after the diet, so an
+        agent loading the Skill (the canonical writable-delegation source) never learned it.
+        Removing it from the Skill fails this test (mutation (b), also in the scratch-
+        checkout bar).
+        """
+        skill_path = ".agent/skills/orca-writable-delegation/SKILL.md"
+        skill = normalize(read(skill_path)).lower()
+        self.assertIn(
+            "an existing worktree may be reused only when it is clean and already at the "
+            "declared base",
+            skill,
+        )
+        self.assertIn(
+            "creates a fresh worker branch without repointing an existing result branch",
+            skill,
+        )
+        # The concrete command sequence stays in the runbook; the Skill references it
+        # rather than duplicating the version-specific alignment recipe.
+        self.assertIn("ORCA_WORKFLOW.md", read(skill_path))
 
     def test_agents_md_stays_within_budget(self) -> None:
         """The always-loaded invariant layer stays small (diet target). A regression

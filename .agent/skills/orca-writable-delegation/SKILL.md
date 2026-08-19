@@ -63,6 +63,11 @@ selection, proven pre-dispatch HEAD equality) is stated independently of the fla
 - Worker branch/worktree Git objects and the anchor stay recoverable until integration
   succeeds or the Execution Lead explicitly rejects the result; temporary refs are cleaned only
   after durable SHA mappings and verification evidence exist.
+- An existing worktree may be reused only when it is clean and already at the declared
+  base, or when the guarded runbook procedure proves there are no commits ahead of the
+  declared base and creates a fresh Worker branch without repointing an existing result
+  branch. The concrete command sequence is the Lead-owned alignment recipe in
+  `docs/runbooks/ORCA_WORKFLOW.md`, which this Skill references rather than duplicates.
 - Do not share one writable Git working directory between Linux nodes; cross-node
   synchronization uses branches, commits, pushes, fetches, pull requests or explicit artifacts.
 
@@ -108,6 +113,12 @@ Lead creates Worker through `worker-start` with explicit base
 
 ## Launch requirements
 
+**Version-specific label:** the `--base-branch <integration_base_ref>` flag named below is a
+current installed-version compatibility detail (Orca 1.4.184), not a stable invariant; it
+serves the stable explicit-base invariant stated independently in the stable-invariants
+section above. Re-confirm it against the version-matched installed Orca guide per the
+"Version-specific Orca mechanics (compatibility notes)" section.
+
 Every supervised writable Worker MUST be launched through
 `orca orchestration worker-start`. The launch MUST explicitly select the required Git base
 using the installed version's supported mechanism, currently
@@ -144,9 +155,6 @@ Execution Lead branch. Before release, anchor `worker_head_sha` under
 `worker_commit_sha → integrated_commit_sha` mapping. Do not merge the Worker branch,
 reset the Lead branch to Worker HEAD, fast-forward the Lead branch, or infer integration
 from Orca lineage.
-
-Do not merge the worker branch, reset the lead branch to worker head, fast-forward the lead
-branch, or infer integration from orca lineage.
 
 The Execution Lead owns integration conflicts. The Worker must never modify the Lead
 worktree; the Lead may resolve a cherry-pick conflict only within the Execution Packet,

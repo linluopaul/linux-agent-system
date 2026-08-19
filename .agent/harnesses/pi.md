@@ -13,10 +13,11 @@ never bypasses `worker-start`.
 
 Role → harness routing is owned by `.agent/policies/routing.yaml`, not independently declared
 here. Per that file Pi is the standard Execution Lead harness class (the **Pi Standard/Fast**
-harness for well-scoped, lower-complexity, LOW/MEDIUM work) and is assigned to Root, Reviewer,
-Worker and Specialist work where a cheap low-cost harness fits; the Root escalates difficult
-engineering to the **Codex Premium Lead** harness. These are routing preferences and Pi is a
-harness that CAN act as the Execution Lead, not one that must — never a permanent binding.
+harness for well-scoped, lower-complexity, LOW/MEDIUM work) and is the default harness for
+Reviewer, Worker, Specialist and Platform Steward work; the Root default harness is **Claude
+Code** (`root: claude_code`), not Pi, and difficult engineering escalates to the **Codex
+Premium Lead** harness. These are routing preferences and Pi is a harness that CAN act as the
+Execution Lead, not one that must — never a permanent binding.
 
 ## Reasoning effort
 
