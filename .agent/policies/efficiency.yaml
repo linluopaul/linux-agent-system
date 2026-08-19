@@ -30,6 +30,34 @@ principles:
   - read_by_section_for_large_documents_and_do_not_retain_transcripts
   - reasoning_effort_is_not_a_token_savings_lever
   - minimize_always_loaded_repository_instructions
+  - premium_model_and_reasoning_effort_are_adaptive
+
+# Reasoning policy, stated independently of whether any harness currently exposes the
+# switching primitive.
+#
+# LOW-COST POOLS: unchanged and still enforced. Reasoning stays HIGH or provider-recommended;
+# it is never lowered merely to save tokens. A cheap model MAY spend more reasoning when that
+# improves first-pass correctness. Cost is optimized through low-cost model routing, targeted
+# context, progressive-disclosure Skills, task-bounded sessions, deterministic verification,
+# terse reporting, and avoiding unnecessary premium escalation.
+#
+# PREMIUM POOLS: model choice and reasoning effort are ADAPTIVE policy variables selected
+# from task complexity, ambiguity, risk, verification strength, observed failure evidence,
+# quota/budget pressure and the expected value of additional reasoning. Premium effort is
+# neither hard-coded HIGH for every premium task nor blindly LOW. The Root/Supervisor defines
+# the envelope (allowed harness/tier, premium budget, required quality/risk level, escalation
+# permission); the agent/harness adapts concrete model and effort WITHIN that envelope;
+# exceeding it requires Root/Supervisor escalation. Decisions occur at task start, a major
+# phase boundary, or evidence-based escalation - not continuously mid-loop.
+premium_adaptivity:
+  allowed: true
+  envelope_owner: root_or_supervisor
+  decisions_occur_at:
+    - task_start
+    - major_phase_boundary
+    - evidence_based_escalation
+  hardcoded_high_forbidden: true
+  low_cost_reasoning_stays_high: true
 
 # Approved cost levers. Reasoning effort is NOT a token-savings lever; it is explicitly
 # excluded from this list because it is a correctness parameter, not a cost parameter.
@@ -45,16 +73,19 @@ cost_levers:
   - premium_model_avoidance
 
 # Named EFFICIENCY PROFILES. The profile selected for a task is recorded in the packet's
-# EFFICIENCY PROFILE field. Reasoning effort is a correctness parameter, not a cost lever:
-# low-cost pools keep HIGH or provider-recommended reasoning effort; never reduce it to
-# save tokens.
+# EFFICIENCY PROFILE field. pool_class marks low-cost vs premium. Reasoning effort is a
+# correctness parameter, not a cost lever: LOW-COST pools keep HIGH reasoning effort (never
+# lowered to save tokens); PREMIUM pools use ADAPTIVE reasoning within the Root/Supervisor
+# envelope, never hard-coded HIGH.
 profiles:
   standard-low-cost:
+    pool_class: low_cost
     reasoning: high
     report_style: terse
     deterministic_first: true
-  premium:
-    reasoning: high
+  premium-adaptive:
+    pool_class: premium
+    reasoning: adaptive
     report_style: concise
     deterministic_first: true
 

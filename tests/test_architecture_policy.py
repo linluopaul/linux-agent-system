@@ -277,11 +277,12 @@ def _is_under(path: Path, parent: Path) -> bool:
 def _is_live_architecture_path(path: Path) -> bool:
     """Is `path` part of the shared live-architecture document set?
 
-    True for a .md/.yaml/.yml file that is a repo-root manifest (AGENTS/README/CLAUDE)
-    or lives under docs/ or .agent/, and is NOT under .github/ or the .agent/runs/
-    telemetry directory. This is the ONE definition of "live architecture text" shared
-    by every repository-walking scanner, so none of them can be perturbed by local
-    runtime telemetry, scratch files or build artifacts.
+    True for a .md/.yaml/.yml file anywhere under the repository root (repo-root
+    manifests AGENTS/README/CLAUDE and any authored root-level prose), docs/ or .agent/,
+    and NOT under .github/ or the .agent/runs/ telemetry directory. This is the ONE
+    definition of "live architecture text" shared by every repository-walking scanner,
+    so none of them can be perturbed by local runtime telemetry, scratch files or build
+    artifacts.
     """
     if path.suffix not in {".md", ".yaml", ".yml"}:
         return False
@@ -407,6 +408,18 @@ ROLE_CLAIM_TOKENS = {
     "reviewer": ["independent review", "high-risk review", "reviewer"],
     "platform_steward": ["platform steward"],
     "worker": ["execution worker", "worker"],
+}
+
+# v2.1.1 F4: a harness file documents exactly ONE harness, so the subject of an
+# 'assigned to <Role>' / 'used for <Role> work' sentence in a harness file IS that file's
+# harness. The v2.1 cross-check missed pi.md's false Root claim precisely because the claim
+# was harness-first ('Pi is assigned to Root ... work'), the reverse of the four role-first
+# shapes it models. This map pins which harness a harness file is about so the F4 guard can
+# resolve a harness-first claim to a (harness, role) pair deterministically.
+HARNESS_FILE_TO_KEY = {
+    ".agent/harnesses/pi.md": "pi",
+    ".agent/harnesses/claude-code.md": "claude_code",
+    ".agent/harnesses/codex-cli.md": "codex_cli",
 }
 
 
@@ -590,17 +603,92 @@ def _role_harness_claims(path: Path, spelling_to_key) -> list[tuple[str, str, st
     return claims
 
 
+# Sorted alternation of every recognisable role-noun spelling, used by the F4
+# harness-first assignment scan below.
+_ROLE_TOKEN_ALT = _alternation(
+    sorted(
+        {token for tokens in ROLE_CLAIM_TOKENS.values() for token in tokens},
+        key=len,
+        reverse=True,
+    )
+)
+
+# The binding forms the two harness-first role-assignment defects used-and-closed by F4.
+# Deliberately narrow: only these exact binders are checked, never generic 'for'/
+# 'default ... for', so pointer-style 'per routing.yaml Pi is the default harness for
+# <Role>' sentences (which legitimately describe the policy default) never trip the guard.
+_HARNESS_ASSIGN_BINDERS = ("assigned to", "used for")
+
+
+def _harness_assignment_claims_on_text(
+    text: str, spelling_to_key, subject_harness: str
+) -> list[tuple[str, str]]:
+    """Harness-first '<H> is assigned to <Role> ...' / '<H> used for <Role> ... work' claims.
+
+    A harness file is about one harness, so the subject of an 'assigned to' / 'used for ...
+    work' sentence is resolved to the file's harness (passed as ``subject_harness``). We
+    match only the exact binder forms the F1 defect used and require the role noun(s)
+    immediately after the binder, so conditional hedges ('used in other roles ... only
+    when') and pointer-style references to routing.yaml never match. Returns a list of
+    (role_key, snippet) pairs.
+    """
+    text = strip_historical_escape_hatch(text)
+    findings: list[tuple[str, str]] = []
+    for binder in _HARNESS_ASSIGN_BINDERS:
+        pattern = re.compile(
+            rf"\b{re.escape(binder)}\b\s+(?:the\s+|a\s+|an\s+)?"
+            rf"(?P<roles>{_ROLE_TOKEN_ALT}(?:[ \t]*[,，、and&]+\s*{_ROLE_TOKEN_ALT})*)",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(text):
+            segment = match.group("roles")
+            roles = {
+                role
+                for role, tokens in ROLE_CLAIM_TOKENS.items()
+                for token in tokens
+                if re.search(
+                    rf"(?<![\w-])\b{re.escape(token)}\b(?:-(?![ \t]))*(?!\w)",
+                    segment,
+                    re.IGNORECASE,
+                )
+            }
+            for role in sorted(roles):
+                findings.append((role, match.group(0)[:90]))
+    return findings
+
+
+def _file_harness_assignment_claims(path: Path, spelling_to_key) -> list[tuple[str, str, str]]:
+    """The harness-first 'assigned to/used for <Role>' claims in ONE harness file.
+
+    Returns (role_key, harness_key, snippet) triples where harness_key is the harness the
+    file documents (its own harness), enabling a direct check against routing.yaml's
+    allowed/default harness for that role. Non-harness files and files whose subject
+    harness the map does not know return no claims.
+    """
+    rel = str(path.relative_to(ROOT))
+    file_harness_key = HARNESS_FILE_TO_KEY.get(rel)
+    if file_harness_key is None:
+        return []
+    raw = strip_historical_escape_hatch(
+        path.read_text(encoding="utf-8", errors="replace")
+    )
+    return [
+        (role, file_harness_key, snippet)
+        for role, snippet in _harness_assignment_claims_on_text(
+            raw, spelling_to_key, file_harness_key
+        )
+    ]
+
+
 WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
-    "AGENTS.md",
-    ".agent/roles/execution-lead.md",
+    ".agent/skills/orca-writable-delegation/SKILL.md",
     "docs/ARCHITECTURE.md",
     "docs/runbooks/ORCA_WORKFLOW.md",
     "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
 )
 
 SUPERVISED_ROOT_TO_LEAD_DOCUMENTS = (
-    "AGENTS.md",
-    ".agent/roles/root.md",
+    ".agent/skills/orca-writable-delegation/SKILL.md",
     "docs/ARCHITECTURE.md",
     "docs/runbooks/ORCA_WORKFLOW.md",
 )
@@ -788,18 +876,8 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("delegation authority", lead.lower())
         self.assertIn("Execute autonomously", lead)
 
-        documents = {
-            "AGENTS.md": read("AGENTS.md"),
-            ".agent/roles/execution-lead.md": lead,
-            ".agent/roles/root.md": read(".agent/roles/root.md"),
-            "docs/ARCHITECTURE.md": read("docs/ARCHITECTURE.md"),
-            "docs/runbooks/ORCA_WORKFLOW.md": read(
-                "docs/runbooks/ORCA_WORKFLOW.md"
-            ),
-            "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md": read(
-                "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md"
-            ),
-        }
+        # v2.1.1: the six conditions have ONE canonical full wording in AGENTS.md; role
+        # files reference that canonical invariant rather than duplicate it.
         conditions = (
             "architecture materially changes",
             "acceptance criteria are ambiguous",
@@ -811,18 +889,44 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "budget or concurrency limit, an unavailable required dependency, or "
             "acceptance criteria that are infeasible or mutually contradictory",
         )
-        for path, document in documents.items():
+        canonical_documents = {
+            "AGENTS.md": read("AGENTS.md"),
+            "docs/ARCHITECTURE.md": read("docs/ARCHITECTURE.md"),
+            "docs/runbooks/ORCA_WORKFLOW.md": read(
+                "docs/runbooks/ORCA_WORKFLOW.md"
+            ),
+            "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md": read(
+                "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md"
+            ),
+        }
+        for path, document in canonical_documents.items():
             normalized = normalize(document)
             self.assertIn("closed", normalized.lower(), path)
             for condition in conditions:
                 self.assertIn(condition, normalized, path)
+
+        # Role files must reference the canonical list; each references AGENTS.md as the
+        # single canonical full wording and never carries the whole six again.
+        for role_path in (
+            ".agent/roles/execution-lead.md",
+            ".agent/roles/root.md",
+        ):
+            text = read(role_path)
+            normalized = normalize(text)
+            self.assertIn("six-condition", normalized.lower(), role_path)
+            self.assertIn("AGENTS.md", normalized, role_path)
+            self.assertLess(
+                sum(1 for c in conditions if c in normalized),
+                len(conditions),
+                role_path,
+            )
 
         for path in (
             "AGENTS.md",
             ".agent/roles/execution-lead.md",
             ".agent/roles/root.md",
         ):
-            normalized = normalize(documents[path])
+            normalized = normalize(read(path))
             self.assertIn(
                 "authority escalation, not a cognitive re-entry", normalized, path
             )
@@ -1120,10 +1224,9 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn(remote_launch, normalize(read(path)), path)
 
         for path in (
-            "AGENTS.md",
-            ".agent/roles/execution-lead.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
         ):
             document = normalize(read(path))
             self.assertIn(
@@ -1136,8 +1239,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
     def test_supervised_writable_worker_requires_release_settlement(self) -> None:
         expected_lifecycle = normalize(WRITABLE_WORKER_LIFECYCLE)
         expected_occurrences = {
-            "AGENTS.md": 1,
-            ".agent/roles/execution-lead.md": 1,
+            ".agent/skills/orca-writable-delegation/SKILL.md": 1,
             "docs/ARCHITECTURE.md": 2,
             "docs/runbooks/ORCA_WORKFLOW.md": 1,
             "docs/decisions/ADR-003-lead-worker-git-integration-contract.md": 1,
@@ -1178,8 +1280,9 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 )
 
     def test_writable_worker_requires_exact_integration_base(self) -> None:
+        skill = ".agent/skills/orca-writable-delegation/SKILL.md"
         documents = {
-            "AGENTS.md": normalize(read("AGENTS.md")),
+            skill: normalize(read(skill)),
             ".agent/roles/worker.md": normalize(read(".agent/roles/worker.md")),
             "docs/ARCHITECTURE.md": normalize(read("docs/ARCHITECTURE.md")),
             "docs/runbooks/ORCA_WORKFLOW.md": normalize(
@@ -1191,7 +1294,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn("integration_base_sha", document, path)
             self.assertIn("git rev-parse HEAD", document, path)
         for path in (
-            "AGENTS.md",
+            skill,
             ".agent/roles/worker.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
         ):
@@ -1203,7 +1306,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn(
             "`git rev-parse HEAD` must exactly equal "
             "`git rev-parse <integration_base_sha>^{commit}`",
-            documents["AGENTS.md"],
+            documents[skill],
         )
         self.assertIn(
             "explicitly verify that `git rev-parse HEAD` exactly equals "
@@ -1215,23 +1318,17 @@ class ArchitecturePolicyTests(unittest.TestCase):
             '"$(git rev-parse <integration_base_sha>^{commit})"',
             documents["docs/runbooks/ORCA_WORKFLOW.md"],
         )
-        for path in ("AGENTS.md", ".agent/roles/worker.md", "docs/ARCHITECTURE.md"):
+        for path in (skill, ".agent/roles/worker.md", "docs/ARCHITECTURE.md"):
             self.assertIn("stop and escalate", documents[path].lower(), path)
-        for path in (
-            "AGENTS.md",
-            ".agent/roles/worker.md",
-            "docs/runbooks/ORCA_WORKFLOW.md",
-        ):
+        for path in (skill, ".agent/roles/worker.md", "docs/runbooks/ORCA_WORKFLOW.md"):
             self.assertIn("git reset --hard", documents[path], path)
             self.assertIn("git checkout -B", documents[path], path)
             self.assertIn("preserve", documents[path].lower(), path)
 
     def test_v1_integration_operation_is_cherry_pick(self) -> None:
+        skill = ".agent/skills/orca-writable-delegation/SKILL.md"
         documents = {
-            "AGENTS.md": normalize(read("AGENTS.md")),
-            ".agent/roles/execution-lead.md": normalize(
-                read(".agent/roles/execution-lead.md")
-            ),
+            skill: normalize(read(skill)),
             "docs/ARCHITECTURE.md": normalize(read("docs/ARCHITECTURE.md")),
             "docs/runbooks/ORCA_WORKFLOW.md": normalize(
                 read("docs/runbooks/ORCA_WORKFLOW.md")
@@ -1249,12 +1346,8 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self,
     ) -> None:
         expected_prohibitions = {
-            "AGENTS.md": (
+            ".agent/skills/orca-writable-delegation/SKILL.md": (
                 "do not merge the worker branch, reset the lead branch to worker head, "
-                "fast-forward the lead branch, or infer integration from orca lineage"
-            ),
-            ".agent/roles/execution-lead.md": (
-                "never merge the worker branch, reset the lead branch to worker head, "
                 "fast-forward the lead branch, or infer integration from orca lineage"
             ),
             "docs/ARCHITECTURE.md": (
@@ -1282,7 +1375,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_execution_lead_owns_integration_conflicts(self) -> None:
         for path in (
-            "AGENTS.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
             "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
@@ -1300,7 +1393,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_worker_result_must_be_committed(self) -> None:
         for path in (
-            "AGENTS.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
             ".agent/roles/worker.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
@@ -1314,7 +1407,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_worker_branch_is_retained_until_settlement(self) -> None:
         for path in (
-            "AGENTS.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
         ):
@@ -1393,8 +1486,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_cherry_pick_provenance_and_empty_pick_are_explicit(self) -> None:
         for path in (
-            "AGENTS.md",
-            ".agent/roles/execution-lead.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
             "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
@@ -1410,7 +1502,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
 
     def test_git_integration_escalations_use_closed_conditions(self) -> None:
         for path in (
-            "AGENTS.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
             "docs/ARCHITECTURE.md",
             "docs/runbooks/ORCA_WORKFLOW.md",
             "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
@@ -1882,13 +1974,20 @@ class ArchitecturePolicyTests(unittest.TestCase):
     def test_reasoning_effort_is_not_a_token_savings_lever(self) -> None:
         efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
 
-        # Every efficiency profile keeps HIGH reasoning effort; no profile may pair a
-        # low-cost dispatch with below-high reasoning. The `typical` (standard-effort)
-        # profile was removed to close the residual token-saving hole. Reasoning effort
-        # is a correctness parameter, not a cost lever.
+        # The `typical` (standard-effort) profile was removed to close the residual
+        # token-saving hole. EVERY LOW-COST profile keeps HIGH reasoning effort (never
+        # lowered to save tokens); reasoning effort is a correctness parameter, not a cost
+        # lever. Premium profiles are ADAPTIVE (see the dedicated premium-policy test).
         self.assertNotIn("typical", efficiency["profiles"])
-        for name, profile in efficiency["profiles"].items():
-            self.assertEqual("high", profile.get("reasoning", ""), name)
+        low_cost_profiles = [
+            (name, profile.get("reasoning", ""))
+            for name, profile in efficiency["profiles"].items()
+            if profile.get("pool_class") == "low_cost"
+            or not profile.get("pool_class")
+        ]
+        self.assertTrue(low_cost_profiles, "no low-cost profile to enforce HIGH reasoning")
+        for name, reasoning in low_cost_profiles:
+            self.assertEqual("high", reasoning, name)
 
         # efficiency.yaml names reasoning/thinking effort as excluded from cost levers.
         self.assertIn(
@@ -1910,6 +2009,39 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "premium_model_avoidance",
         ):
             self.assertIn(lever, cost_levers)
+
+    def test_premium_model_and_reasoning_effort_are_adaptive(self) -> None:
+        """Premium model choice and reasoning effort are ADAPTIVE, never hard-coded HIGH
+        everywhere. The policy is documented independently of whether any harness currently
+        exposes the switching primitive."""
+        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+        self.assertIn(
+            "premium_model_and_reasoning_effort_are_adaptive", efficiency["principles"]
+        )
+        adaptivity = efficiency.get("premium_adaptivity", {})
+        self.assertTrue(adaptivity.get("allowed"))
+        self.assertEqual(
+            "root_or_supervisor", adaptivity.get("envelope_owner")
+        )
+        self.assertTrue(adaptivity.get("hardcoded_high_forbidden"))
+        decision_points = adaptivity.get("decisions_occur_at", [])
+        for point in (
+            "task_start",
+            "major_phase_boundary",
+            "evidence_based_escalation",
+        ):
+            self.assertIn(point, decision_points)
+
+        # No premium profile may hard-code HIGH; the premium profile is adaptive.
+        premium = [
+            p
+            for p in efficiency["profiles"].values()
+            if p.get("pool_class") == "premium"
+        ]
+        self.assertTrue(premium, "no premium (adaptive) profile is declared")
+        for profile in premium:
+            self.assertNotEqual("high", profile.get("reasoning"), "premium must be adaptive")
+            self.assertEqual("adaptive", profile.get("reasoning"))
 
     def test_efficiency_policy_does_not_weaken_high_risk_guardrails(self) -> None:
         efficiency = read(".agent/policies/efficiency.yaml")
@@ -2002,6 +2134,232 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 "Live role->harness claim(s) contradict routing.yaml "
                 "defaults.preferred_harness:\n" + "\n".join(failures)
             )
+
+    def test_harness_files_cannot_claim_role_assignment_contradicting_policy(self) -> None:
+        """F1/F4 guard: a harness file may not use the harness-first prose forms 'assigned
+        to <Role>' or 'used for <Role> work' to claim a role assignment that routing.yaml
+        does not default/prefer that harness for.
+
+        The F1 defect is exactly the shape this guard closes: pi.md claimed Pi 'is assigned
+        to Root, Reviewer, Worker and Specialist work' even though routing.yaml sets
+        `defaults.preferred_harness.root: claude_code`. The v2.1 role-first cross-check
+        (test_live_role_harness_claims_agree_with_policy) missed it because the claim is
+        harness-first - the reverse of the four role-first shapes it models. This guard
+        closes only that named prose form and never the pointer-style 'per routing.yaml'
+        sentences.
+        """
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        defaults = routing["defaults"]
+        preferred = defaults["preferred_harness"]
+        allowed = {role: [preferred[role]] for role in preferred}
+        premium = defaults.get("execution_lead", {}).get("premium_escalation_harness")
+        if premium and premium not in allowed["execution_lead"]:
+            allowed["execution_lead"].append(premium)
+        spelling_to_key = _harness_spelling_map(list(routing["harnesses"].keys()))
+
+        # The guard MUST fail on the exact pre-fix pi.md claim (mutation (a), also covered
+        # in the scratch-checkout bar) and pass on the corrected text.
+        pre_fix = (
+            "Per that file Pi is the standard Execution Lead harness class and is "
+            "assigned to Root, Reviewer, Worker and Specialist work where a cheap "
+            "low-cost harness fits."
+        )
+        self.assertTrue(
+            _harness_assignment_claims_on_text(pre_fix, spelling_to_key, "pi"),
+            "F4 guard must catch the pre-fix 'assigned to Root' claim",
+        )
+        corrected = (
+            "Per that file Pi is the standard Execution Lead harness class and is the "
+            "default harness for Reviewer, Worker, Specialist and Platform Steward work; "
+            "the Root default harness is Claude Code (root: claude_code), not Pi."
+        )
+        self.assertEqual(
+            [],
+            _harness_assignment_claims_on_text(corrected, spelling_to_key, "pi"),
+            "false positive on corrected pi.md role-routing prose",
+        )
+
+        failures = []
+        for path in (ROOT / ".agent" / "harnesses").glob("*.md"):
+            for role_key, harness_key, snippet in _file_harness_assignment_claims(
+                path, spelling_to_key
+            ):
+                if harness_key not in allowed.get(role_key, []):
+                    failures.append(
+                        f"{path.relative_to(ROOT)} claims harness '{harness_key}' is "
+                        f"assigned/used for role '{role_key}' but routing.yaml "
+                        f"defaults.preferred_harness allows "
+                        f"{sorted(allowed.get(role_key, []))} :: {snippet!r}"
+                    )
+        if failures:
+            self.fail(
+                "Live harness-first role-assignment claim contradicts routing.yaml:\n"
+                + "\n".join(failures)
+            )
+
+    def test_skill_preserves_existing_worktree_reuse_invariant(self) -> None:
+        """v2.1.1 F2: the guarded worktree-reuse invariant must live at its canonical home
+        in the writable-delegation Skill, stated independently of any version-specific flag
+        mechanics.
+
+        This invariant survived only in the ORCA_WORKFLOW runbook after the diet, so an
+        agent loading the Skill (the canonical writable-delegation source) never learned it.
+        Removing it from the Skill fails this test (mutation (b), also in the scratch-
+        checkout bar).
+        """
+        skill_path = ".agent/skills/orca-writable-delegation/SKILL.md"
+        skill = normalize(read(skill_path)).lower()
+        self.assertIn(
+            "an existing worktree may be reused only when it is clean and already at the "
+            "declared base",
+            skill,
+        )
+        self.assertIn(
+            "creates a fresh worker branch without repointing an existing result branch",
+            skill,
+        )
+        # The concrete command sequence stays in the runbook; the Skill references it
+        # rather than duplicating the version-specific alignment recipe.
+        self.assertIn("ORCA_WORKFLOW.md", read(skill_path))
+
+    def test_agents_md_stays_within_budget(self) -> None:
+        """The always-loaded invariant layer stays small (diet target). A regression
+        back to the 450-line / ~20.6KB pre-diet AGENTS.md must fail this guard."""
+        agents = read("AGENTS.md")
+        lines = agents.count("\n") + 1
+        size = len(agents.encode("utf-8"))
+        self.assertLess(lines, 210, "AGENTS.md line count exceeds the instruction-diet budget")
+        self.assertLess(size, 13_000, "AGENTS.md byte size exceeds the instruction-diet budget")
+
+    def test_detailed_lifecycle_not_duplicated_in_always_loaded_files(self) -> None:
+        """The detailed writable-lifecycle procedure is NOT duplicated into the always-
+        loaded layer; it lives at its canonical home in the load-on-demand Skill."""
+        agents = read("AGENTS.md")
+        skill = read(".agent/skills/orca-writable-delegation/SKILL.md")
+        # AGENTS.md carries invariants and pointers only, never the detailed procedure.
+        for marker in (
+            "Lead creates Worker through",
+            "git cherry-pick --skip",
+            "ALREADY_PRESENT",
+        ):
+            self.assertNotIn(marker, agents, marker)
+        # The canonical home retains the full procedure.
+        self.assertIn("Lead creates Worker through", skill)
+        self.assertIn("ALREADY_PRESENT", skill)
+        self.assertIn("git cherry-pick --skip", skill)
+
+    def test_agents_md_immutable_base_invariant_and_skill_pointer(self) -> None:
+        agents = read("AGENTS.md")
+        self.assertIn("integration_base_sha", agents)
+        self.assertIn(".agent/skills/orca-writable-delegation/SKILL.md", agents)
+
+    def test_six_condition_list_has_single_canonical_copy(self) -> None:
+        conditions = (
+            "architecture materially changes",
+            "acceptance criteria are ambiguous",
+            "difficult diagnosis remains unresolved",
+            "HIGH-risk independent review is required",
+            "deterministic verification cannot resolve uncertainty",
+            "execution is blocked by something outside the Execution Lead's authority—a "
+            "protected human gate, a missing authorization or credential, an exhausted "
+            "budget or concurrency limit, an unavailable required dependency, or "
+            "acceptance criteria that are infeasible or mutually contradictory",
+        )
+        agents = normalize(read("AGENTS.md"))
+        for condition in conditions:
+            self.assertIn(condition, agents)
+        # No role file carries the full six-condition list again.
+        for role_path in (
+            ".agent/roles/execution-lead.md",
+            ".agent/roles/root.md",
+            ".agent/roles/worker.md",
+            ".agent/roles/reviewer.md",
+            ".agent/roles/platform-steward.md",
+        ):
+            text = normalize(read(role_path))
+            self.assertLess(
+                sum(1 for c in conditions if c in text),
+                len(conditions),
+                role_path,
+            )
+
+    def test_harness_files_do_not_declare_role_default_independently(self) -> None:
+        routing = self.load_yaml(".agent/policies/routing.yaml")
+        # routing.yaml is the normative role->harness source; Pi is a harness, not a pool.
+        self.assertIn("pi", routing["harnesses"])
+        self.assertNotIn("pi", routing["model_pools"])
+        self.assertEqual("claude_code", routing["defaults"]["preferred_harness"]["root"])
+        self.assertEqual("pi", routing["defaults"]["preferred_harness"]["execution_lead"])
+        self.assertEqual(
+            "codex_cli", routing["defaults"]["execution_lead"]["premium_escalation_harness"]
+        )
+        # Every harness file points to routing.yaml for role preference; none independently
+        # declares a role default, and the "believed default" hedge is removed.
+        for harness in ("pi", "claude-code", "codex-cli"):
+            text = read(f".agent/harnesses/{harness}.md")
+            self.assertIn("routing.yaml", text, harness)
+            self.assertIn("bound", text.lower(), harness)
+        self.assertNotIn("believed default", read(".agent/harnesses/pi.md").lower())
+        # Pi's durable identity no longer names a host-specific default pool.
+        self.assertNotIn("default pool is", read(".agent/harnesses/pi.md").lower())
+
+    def test_medium_review_budget_is_bounded(self) -> None:
+        retry = self.load_yaml(".agent/policies/retry.yaml")
+        medium = retry["review_budget"]["medium"]
+        self.assertTrue(medium["applies_when_review_is_required"])
+        for key in ("initial_review", "fix_cycles", "focused_re_reviews"):
+            self.assertIsInstance(medium[key], int, key)
+            self.assertGreaterEqual(medium[key], 1, key)
+        self.assertEqual("return_to_root_for_diagnosis", medium["on_further_blocking"])
+
+    def test_review_authority_boundary_retry_cannot_require_review(self) -> None:
+        """AMENDMENT 1: retry.yaml may govern only how many review cycles run AFTER
+        review is required; it must never itself make review required. risk.yaml remains
+        the sole authority for whether independent review is required."""
+        retry = self.load_yaml(".agent/policies/retry.yaml")
+        import json as _json
+
+        flat = _json.dumps(retry)
+        self.assertNotIn("independent_review", flat)
+        self.assertNotIn("make review required", flat)
+        risk = self.load_yaml(".agent/policies/risk.yaml")
+        self.assertEqual("conditional", risk["levels"]["medium"]["independent_review"])
+        self.assertEqual("required", risk["levels"]["high"]["independent_review"])
+
+    def test_writable_conditional_block_is_mandatory_when_used(self) -> None:
+        """CORE/CONDITIONAL: conditionality is not optionality — when writable delegation
+        is used, the writable block is mandatory."""
+        agents = normalize(read("AGENTS.md"))
+        self.assertIn(
+            "when writable delegation is used, the writable block is mandatory",
+            agents.lower(),
+        )
+        for field in (
+            "WORKTREE / BASE COMMIT",
+            "LEAD BRANCH",
+            "INTEGRATION_BASE_SHA",
+            "ALLOWED CHANGED PATHS / SCOPE",
+            "VERIFICATION REQUIREMENTS",
+            "RESULT MODE",
+        ):
+            self.assertIn(field, agents, field)
+        self.assertIn("CORE", agents)
+        self.assertIn("CONDITIONAL", agents)
+
+    def test_no_mandatory_handoff_memory_scratch_subsystem(self) -> None:
+        """The diet must not introduce a second state system: no mandatory HANDOFF,
+        memory hierarchy, SCRATCH, or automatic-Learnings protocol in the governed docs."""
+        governed = [
+            "AGENTS.md",
+            ".agent/skills/orca-writable-delegation/SKILL.md",
+            ".agent/roles/root.md",
+            ".agent/roles/execution-lead.md",
+            ".agent/roles/worker.md",
+        ]
+        for relative in governed:
+            low = read(relative).lower()
+            for marker in ("handoff.md", "scratch.md", "# handoff", "# memory", "learnings"):
+                self.assertNotIn(marker, low, f"{relative}: {marker}")
 
 
 if __name__ == "__main__":
