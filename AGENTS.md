@@ -36,9 +36,10 @@ Important project knowledge must not exist only inside an agent session.
 ## Repository Map
 
 - `docs/` — architecture, decisions and runbooks
-- `.agent/providers/` — provider-specific guidance
+- `.agent/harnesses/` — harness class profiles (pi, claude-code, codex-cli)
+- `.agent/providers/` — model/provider-pool profiles
 - `.agent/roles/` — role-specific guidance
-- `.agent/policies/` — routing, risk and retry policies
+- `.agent/policies/` — routing, risk, retry, capabilities and efficiency policies
 - `.agent/skills/` — reusable agent workflows
 - `.agent/runs/` — runtime telemetry and task artifacts
 - `controller/` — deterministic Python controller
@@ -93,6 +94,16 @@ INTEGRATION_BASE_SHA
 ALLOWED CHANGED PATHS / SCOPE
 VERIFICATION REQUIREMENTS
 RESULT MODE
+EXECUTION HARNESS
+MODEL POLICY
+CAPABILITY PROFILE
+EFFICIENCY PROFILE
+CONTEXT BUDGET
+OUTPUT MODE
+SESSION POLICY
+COMPACTION POLICY
+EXECUTION / RETRY BUDGET
+ESCALATION THRESHOLD
 BUDGET / HUMAN GATES
 ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
@@ -109,6 +120,15 @@ uncertainty the Lead must retain.
 
 The packet's `ESCALATION CONTRACT` may narrow the standing conditions below for a task,
 but it may never extend or redefine this closed list.
+
+Agent-to-agent reports use the terse `STATUS / CHANGED / VERIFY / COMMIT / BLOCKERS /
+UNCERTAINTY / NEXT` block and never narrate routine tool usage
+(`.agent/policies/efficiency.yaml`). Terse reporting must not apply to architecture
+decisions, acceptance criteria, security warnings, destructive operations, human approval
+requests, unresolved ambiguity or HIGH-risk findings; human-facing communication stays
+concise but normal prose. The Root selects the Execution Lead harness class and the
+capability profile per task; assignments declare only task-relevant capabilities
+(`.agent/policies/capabilities.yaml`).
 
 The Execution Lead re-engages the Root only when one of these six conditions applies:
 
@@ -159,23 +179,41 @@ Reserve premium agents for:
 - conflict resolution
 - high-risk independent verification
 
-Provider roles are preferences, not permanent bindings.
+Routing is role to harness class to model/provider pool; harnesses and model/provider
+pools are preferences, never permanent bindings. Pi is a harness with a runtime-selected
+model, never a fixed model. The Root selects the Execution Lead harness per task. The
+default is the Pi Standard/Fast Lead for well-scoped, lower-complexity, LOW/MEDIUM work;
+the Codex Premium Lead is the escalation for difficult engineering reasoning, complex
+repository investigation, difficult debugging, HIGH-risk or cross-module implementation,
+and when cheaper execution proves insufficient.
 
-The default provider preferences are:
+The default model/provider-pool preferences are:
 
-- Claude for Root / Cognitive Control Plane work
-- Codex for Execution Lead / Engineering Control Plane work
-- DeepSeek for low-cost, well-scoped Execution Worker implementation, search, test
-  generation and mechanical refactoring
-- Claude, then Codex, for fresh-session independent review
-- a provider different from the implementer's provider for HIGH-risk review
+- a high-capability pool (for example Claude) for Root / Cognitive Control Plane work
+- a low-cost pool (for example DeepSeek) for well-scoped Execution Worker implementation,
+  search, test generation and mechanical refactoring (the Worker role is not bound to any
+  one pool)
+- a low-cost pool (for example volcengine-ark-coding-plan, falling back to DeepSeek) for
+  the Pi Standard/Fast Execution Lead
+- a capable pool, then another capable pool (for example Claude, then Codex), for
+  fresh-session independent review
+- a pool different from the implementer's pool for HIGH-risk review
 
-Availability, capability, budget and task evidence may justify another provider.
+Availability, capability, budget and task evidence may justify another harness or pool.
 
-Normal execution usage should substantially exceed Root usage; with current preferences,
-this normally means Codex execution usage exceeds Claude Root usage. The following workflow
-rules are intended to produce that role-first asymmetry, which
-`root_vs_execution_usage_share` verifies once usage is collected:
+Reasoning/thinking effort is not a token-savings lever: low-cost pools keep high or
+provider-recommended effort, and savings come from routing and context discipline only.
+
+Efficiency and terse reporting are native principles defined in
+`.agent/policies/efficiency.yaml`; never narrate routine tool usage. Efficiency targets
+never weaken acceptance criteria, HIGH-risk safeguards, independence or human gates — see
+`.agent/policies/risk.yaml`.
+
+Normal execution volume should substantially exceed Root reasoning volume, and low-cost
+execution volume should exceed premium execution volume. The following workflow
+rules are intended to produce that role-first asymmetry, which the execution-cost metrics
+`execution_vs_root_usage_share` and `premium_vs_low_cost_execution_share` verify once
+usage is collected:
 
 - Root reconnaissance is bounded to what is needed to specify the work correctly; reading
   the whole codebase to prepare a packet is an anti-pattern.

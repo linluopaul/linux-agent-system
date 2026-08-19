@@ -1,0 +1,94 @@
+# Efficiency policy.
+#
+# Cost policy governs how agent work is executed: use the cheapest capable resource,
+# prefer deterministic tools and tests over model calls, and keep execution volume above
+# root reasoning volume while low-cost execution volume stays above premium execution
+# volume. Routine tool usage is never narrated in agent-to-agent reports.
+#
+# The EFFICIENCY PROFILE names used by Execution Packets are defined here. This policy MUST
+# NOT weaken the HIGH-risk, independence, human-gate or destructive-operation safeguards
+# owned by risk.yaml and the Verification / Review sections. Efficiency never overrides
+# acceptance criteria or HIGH-risk safeguards.
+
+# The efficiency principles below express the policy. Terse reporting is a native
+# architecture principle that stands alone; it is not provided by, and does not depend on,
+# any third-party skill, extension or dependency.
+#
+# Always-loaded context (AGENTS.md or the equivalent) holds cross-cutting invariants and
+# routing essentials, not every detailed workflow; detailed procedures live in load-on-demand
+# policies, skills, runbooks and ADRs.
+principles:
+  - use_the_cheapest_capable_resource
+  - prefer_deterministic_tools_tests_and_evals_before_model_calls
+  - execution_volume_exceeds_root_reasoning_volume
+  - low_cost_execution_volume_exceeds_premium_execution_volume
+  - never_narrate_routine_tool_usage
+  - use_terse_structured_agent_to_agent_reporting
+  - clarity_overrides_terseness_when_clarity_matters
+  - bound_root_reconnaissance_and_use_one_packet_per_task
+  - report_compressed_evidence_not_transcripts_or_reasoning_dumps
+  - read_by_section_for_large_documents_and_do_not_retain_transcripts
+  - reasoning_effort_is_not_a_token_savings_lever
+  - minimize_always_loaded_repository_instructions
+
+# Approved cost levers. Reasoning effort is NOT a token-savings lever; it is explicitly
+# excluded from this list because it is a correctness parameter, not a cost parameter.
+# Savings come from routing and context/session discipline, never from lower reasoning
+# effort. Low-cost pools keep high or provider-recommended reasoning effort.
+cost_levers:
+  - cheaper_model_routing
+  - targeted_context
+  - progressive_disclosure_skills
+  - task_bounded_sessions
+  - terse_reporting
+  - deterministic_verification
+  - premium_model_avoidance
+
+# Named EFFICIENCY PROFILES. The profile selected for a task is recorded in the packet's
+# EFFICIENCY PROFILE field. Reasoning effort is a correctness parameter, not a cost lever:
+# low-cost pools keep HIGH or provider-recommended reasoning effort; never reduce it to
+# save tokens.
+profiles:
+  standard-low-cost:
+    reasoning: high
+    report_style: terse
+    deterministic_first: true
+  premium:
+    reasoning: high
+    report_style: concise
+    deterministic_first: true
+
+# Terse agent-to-agent report block. Used between agents, never on the human-facing
+# Supervisor/Root channel, which stays concise but normal prose.
+report_block:
+  header: STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT
+  fields:
+    - STATUS
+    - CHANGED
+    - VERIFY
+    - COMMIT
+    - BLOCKERS
+    - UNCERTAINTY
+    - NEXT
+
+# Terse reporting MUST NOT apply to these categories. Written clearly and in full
+# regardless of the report block.
+clarity_overrides:
+  - architecture_decisions
+  - acceptance_criteria
+  - security_warnings
+  - destructive_operations
+  - human_approval_requests
+  - unresolved_ambiguity
+  - high_risk_findings
+
+# Efficiency targets. Objectives, not enforced quotas; never a justification for bypassing
+# acceptance criteria or HIGH-risk safeguards.
+targets:
+  execution_volume_exceeds_root_reasoning_volume: true
+  low_cost_execution_volume_exceeds_premium_execution_volume: true
+  keep_context_and_output_cost_per_successful_task_bounded: true
+
+# This policy and its reporting depend on nothing external. No third-party dependency,
+# skill or extension is required to implement the efficiency and terse-reporting rules.
+dependencies: []

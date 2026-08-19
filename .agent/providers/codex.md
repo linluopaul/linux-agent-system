@@ -1,25 +1,23 @@
-# Codex Provider
+# Codex Model/Provider Pool
 
-Codex is the preferred provider for the first-class Execution Lead / Engineering Control
-Plane role.
+This file describes the **Codex model/provider pool**, a selectable pool profiled in
+`.agent/providers/` and listed under `model_pools` in `routing.yaml`. It is a pool, not a
+role and not a permanent binding.
 
-When acting as Execution Lead, consume the Root's Execution Packet and own implementation
-planning, repository investigation, coding, debugging, deterministic tests and
-verification, iterative fixes, and the delegation decision. Solve directly, use
-provider-internal subagents, or dispatch an Execution Worker as evidence and cost warrant.
+The Codex pool backs the **Codex Premium Execution Lead** harness class
+(`.agent/harnesses/codex-cli.md`), which the Root selects for difficult engineering
+reasoning, complex repository investigation, difficult debugging, HIGH-risk or cross-module
+implementation, and escalation after cheaper execution proves insufficient. Codex is **not**
+the mandatory Execution Lead for every task; the Pi Standard/Fast Lead is the default for
+well-scoped, lower-complexity, LOW/MEDIUM work.
 
-Execute autonomously until acceptance criteria are met or a closed Root re-entry condition
-applies. Return compressed evidence instead of full transcripts or reasoning dumps, and
-keep durable state in the repository and GitHub rather than only in the session.
+Codex may be selected for other roles when capability, availability, budget or independence
+make it the best fit. For independent review of a Codex implementation, prefer a different
+capable reviewer pool or record a human-visible same-provider correlation waiver.
 
-Codex is preferred for cross-provider independent review of HIGH-risk work implemented by
-another provider. A Codex implementation requires another capable reviewer provider, or a
-human-visible waiver accepting the residual same-provider correlation risk.
-
-Codex may also act as Root, Worker, specialist or Reviewer when capability, availability,
-budget or independence requirements make it the best fit. The Execution Lead preference is
-not a permanent role binding.
-
-When reviewing, evaluate the original task and implementation independently. Prioritize
-correctness, regressions, edge cases, security, financial logic, data integrity and missing
-verification. Classify findings as blocking or non-blocking.
+When selected as Execution Lead, consume the Execution Packet and own implementation
+planning, repository investigation, coding, debugging, deterministic tests and verification,
+iterative fixes, and the delegation decision. Execute autonomously until acceptance criteria
+are met or a closed Root re-entry condition applies. Return compressed evidence, keep
+durable state in the repository and GitHub, and never bypass `orca orchestration
+worker-start`.

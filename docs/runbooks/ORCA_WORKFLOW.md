@@ -30,7 +30,8 @@ participating installation.
 
 ## 2. Prepare the Execution Packet
 
-The Root / Cognitive Control Plane is preferably Claude. It performs bounded
+The Root / Cognitive Control Plane runs in a capable harness/pool (for example Pi with a
+high-capability pool, or Claude Code). It performs bounded
 reconnaissance—only enough reading to specify the work correctly—and produces one
 Execution Packet as the sole normal Root-to-Execution-Lead interface:
 
@@ -51,6 +52,16 @@ INTEGRATION_BASE_SHA
 ALLOWED CHANGED PATHS / SCOPE
 VERIFICATION REQUIREMENTS
 RESULT MODE
+EXECUTION HARNESS
+MODEL POLICY
+CAPABILITY PROFILE
+EFFICIENCY PROFILE
+CONTEXT BUDGET
+OUTPUT MODE
+SESSION POLICY
+COMPACTION POLICY
+EXECUTION / RETRY BUDGET
+ESCALATION THRESHOLD
 BUDGET / HUMAN GATES
 ESCALATION CONTRACT
 EXPECTED REPORT FORMAT
@@ -89,7 +100,9 @@ anti-pattern; repository investigation belongs to the Execution Lead.
 
 ## 3. Create or Select the Root Workspace
 
-Claude is the preferred Root provider. Use an Orca-managed workspace for the Root and an
+The Root runs in a capable harness/pool and selects the Execution Lead harness class per
+task (Pi Standard/Fast is the default for LOW/MEDIUM); for difficult engineering the Root
+may escalate to the Codex Premium Lead. Use an Orca-managed workspace for the Root and an
 Orca-managed worktree for each writable task. Choose worktree lineage separately from the
 Git base:
 
@@ -102,9 +115,12 @@ guide's setup policy. Do not replace it with raw `git worktree` plus an ad hoc P
 
 ## 4. Dispatch the Execution Lead
 
-Codex is the preferred first-class Execution Lead / Engineering Control Plane. The Root
-uses Orca Orchestration to delegate bounded execution authority without transferring
-outcome ownership:
+The Root dispatches an Execution Lead through Orca Orchestration. The default is the **Pi
+Standard/Fast Lead** (pi harness + low-cost pool); for difficult engineering reasoning,
+complex repository investigation, difficult debugging, HIGH-risk or cross-module
+implementation the Root selects the **Codex Premium Lead**. The chosen EXECUTION HARNESS
+is recorded in the Execution Packet. Harness choice never bypasses
+`orca orchestration worker-start`.
 
 Every supervised writable Root-to-Execution-Lead dispatch MUST be launched through
 `orca orchestration worker-start`; low-level `worktree create` plus
@@ -140,8 +156,9 @@ dispatch and reports compressed evidence rather than transcripts or reasoning du
 The Execution Lead owns implementation planning, repository investigation, coding,
 debugging, tests/verification, iterative fixes and the delegation decision. It may solve
 directly, use provider-internal subagents, or create and settle Orca sub-dispatches.
-Prefer DeepSeek for well-scoped implementation, search, test generation and mechanical
-refactoring when a configured launcher is available. An Execution Worker has no delegation
+Prefer a low-cost pool (e.g. DeepSeek) for well-scoped implementation, search, test
+generation and mechanical refactoring when a configured launcher is available; the Worker
+role is not bound to any one pool. An Execution Worker has no delegation
 authority and routes routine questions to the Lead, not the Root. Agent IDs are
 installation-specific; inspect the runtime rather than guessing an ID.
 

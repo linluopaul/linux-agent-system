@@ -7,10 +7,13 @@ Observe workflow metrics, recurring failures, blocked tasks, review
 results, cost pressure, retries, and node utilization.
 
 Track the Root / Cognitive Control Plane and Execution Lead / Engineering Control Plane as
-separate roles. Own aggregation and drift review for
-`root_vs_execution_usage_share`: in V0, validate each task's manually recorded metric and
-review the rolling 20-task window for Root-heavy operation. Provider names are the current
-instantiation, not the invariant.
+separate roles. Own aggregation and drift review for the execution-cost metrics
+`execution_vs_root_usage_share` (the lineage of `root_vs_execution_usage_share`, keeping
+its ADR-002 computation), `premium_vs_low_cost_execution_share` and
+`context_and_output_cost_per_successful_task`. In V0, validate each task's manually
+recorded metric and review the rolling 20-task window for Root-heavy or premium-heavy
+operation. Harness names, model/provider-pool names and capability profiles are the
+current instantiation, not the invariant.
 
 Maintain and improve the Platform Kanban.
 
