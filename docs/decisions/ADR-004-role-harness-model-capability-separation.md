@@ -143,7 +143,7 @@ not weaken HIGH-risk guardrails, and that the validated lifecycle invariants sur
 
 The `test_no_live_provider_as_role_binding_anywhere` policy test is a standing CI gate
 that scans live architecture text for a provider/model-pool name bound to a role noun.
-It is a deliberate, documented syntactic heuristics and its limits are known and stated
+It is a deliberate, documented syntactic heuristic and its limits are known and stated
 here and in the test docstring so the suite is not overclaimed:
 
 - It is bilingual by construction: docs/ARCHITECTURE.md is majority-Chinese prose and the

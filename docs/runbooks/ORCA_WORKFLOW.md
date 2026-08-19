@@ -30,8 +30,9 @@ participating installation.
 
 ## 2. Prepare the Execution Packet
 
-The Root / Cognitive Control Plane runs in a capable harness/pool (for example Pi with a
-high-capability pool, or Claude Code). It performs bounded
+The Root / Cognitive Control Plane runs in a capable harness/pool. Its default harness is
+Claude Code with a high-capability pool (per `routing.yaml`); Pi with a capable pool is an
+acceptable alternative. It performs bounded
 reconnaissance—only enough reading to specify the work correctly—and produces one
 Execution Packet as the sole normal Root-to-Execution-Lead interface:
 
@@ -185,7 +186,10 @@ compressed Worker evidence.
 
 ### 4.1 Writable Worker Git Integration Contract v1
 
-Use this procedure for every writable Execution Lead → Worker dispatch. Orca
+Use this procedure for every writable Execution Lead → Worker dispatch. The normative
+writable-delegation contract (stable invariants + version-specific Orca mechanics) lives in
+`.agent/skills/orca-writable-delegation/SKILL.md`; this section is the operational command
+reference and delegates to that Skill as the canonical source. Orca
 parent/child lineage is orchestration provenance, not proof of Git ancestry; never rely on
 the repository default base for a nested writable Worker.
 

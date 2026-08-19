@@ -18,6 +18,22 @@
 #
 # Quantitative retry limits will be defined after manual workflow data
 # has been collected.
+#
+# Review-cycle budget (AMENDMENT 1). risk.yaml is the SOLE authority for WHETHER independent
+# review is required and is NOT edited here. This file governs only HOW MANY review/fix/
+# re-review cycles are allowed AFTER review has already been required by risk/task policy.
+# It must never make review required itself, and HIGH-risk work is governed by risk.yaml
+# (which may justify more review, never fewer). Unlimited review/fix loops are forbidden.
+
+# Root's options on exhaustion of the MEDIUM budget: continue the current harness, change
+# strategy, escalate to Codex Premium, or amend acceptance/tests.
+review_budget:
+  medium:
+    applies_when_review_is_required: true
+    initial_review: 1
+    fix_cycles: 1
+    focused_re_reviews: 1
+    on_further_blocking: return_to_root_for_diagnosis
 
 execution_lead_failure:
   lifecycle_recovery_owner: root_parent_run_coordinator
