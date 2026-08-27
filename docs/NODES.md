@@ -1,6 +1,6 @@
 # Nodes
 
-> 最后更新：2026-08-26
+> 最后更新：2026-08-27
 > 本文档供人阅读。机器可读的 node registry 归属 Controller V2（`ROADMAP.md` V2）。
 > 详细硬件清单见 `docs/inventory/agent-desktop.md`，本文不重复。
 
@@ -76,7 +76,7 @@ x11vnc 直接抓 X root window，**不依赖物理显示器**：
 
 | 路径 | 状态 |
 |---|---|
-| SSH + `orca-ide` CLI | ✅ 最可靠，`--json` 输出带宽极低 |
+| SSH + `orca-ide` CLI | ✅ 最可靠，`--json` 输出带宽极低。**但编排（worker-release）要求 Orca GUI 开着**，见 Travel Laptop 条目下的「Orchestration 边界结论」 |
 | 远程桌面里的 Orca IDE | ✅ 经上方 RDP |
 | Orca Web client | ✅ 经 SSH 隧道（`~/.ssh/config` 已配 `LocalForward 6768`）；
   浏览器须用 `http://localhost:6768/...`，用主机名会因非安全上下文导致 `crypto.randomUUID` 不可用而白屏 |
@@ -117,7 +117,70 @@ x11vnc 直接抓 X root window，**不依赖物理显示器**：
 
 人明确决定不在 Travel Laptop 安装，改用手机 / Orca / Remote Control 满足需求。
 因此 addendum §2.6 的「provider 凭据放宽」**不适用**，笔记本不持有 Anthropic 凭据。
-addendum §2.1 要求的「桌面版 SSH 会话中 Orca orchestration 边界」实测**不适用**（前提不成立）。
+addendum §2.1 要求的「桌面版 SSH 会话中 Orca orchestration 边界」前提不成立，
+改测等价且更常用的场景，结论见下。
+
+### Orchestration 边界结论（2026-08-27 实测，addendum §2.1）
+
+测试场景：**从普通 SSH 终端（非 Orca 创建）用 `orca-ide` CLI 走完整编排闭环**
+（Run → Task → worker-start → check → ack → worker-release），四组对照实验。
+
+**结论：闭环完全成立，但有一条硬前提——Orca GUI 必须开着。**
+
+#### 唯一真实约束：Orca 桌面窗口必须处于 `available`
+
+| GUI 状态 | 终端 `surface` | 创建时警告 | `worker-release` |
+|---|---|---|---|
+| 关（`openable`） | `background` | `could not make it discoverable` | ❌ `release_unknown` / `tab_not_found` / exit 1 |
+| 开（`available`） | `visible` | 无 | ✅ `released` / `closed_agent_terminal` / exit 0 |
+
+release 的清理动作是关闭 worker 的 UI tab；GUI 关闭时创建的终端从来没有 tab，故必然失败。
+**已排除的假设**：ack/release 顺序无关——GUI 关闭时先 release 后 ack 同样失败。
+
+→ **出行期间 Desktop 上的 Orca IDE 必须常驻打开**，人不需要看。
+  开窗：`DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority orca-ide open --json`
+  编排前自检：`orca-ide status --json` 的 `result.app.desktopWindowStatus` 须为 `available`。
+
+#### 身份是前置条件，且必须落盘
+
+`check` / `inbox` / `worker-release` **不接受 `--from`**（`check --run <id>` 返回
+`no_active_terminal`）。做法是建一个协调者终端当身份载体，handle 写入环境变量**并落盘**：
+
+```bash
+H=$(orca-ide terminal create --worktree "id:<repo>::<path>" --title coordinator --json \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['terminal']['handle'])")
+echo "$H" > ~/.orca-root-handle          # 落盘是必需动作，不是可选
+export ORCA_TERMINAL_HANDLE="$H"
+```
+
+该终端内**不需要跑任何东西**。
+
+#### 断线与身份丢失的恢复能力（两级均已实测通过）
+
+- **shell 死掉**（网断 / SSH 掉 / tmux 被杀）：终端记录在服务端，不随 shell 消失；
+  worker 由 daemon 托管继续运行。新 shell
+  `export ORCA_TERMINAL_HANDLE=$(cat ~/.orca-root-handle)` 即完整恢复，
+  `run-current` 与 `check --wait` 均正常。
+- **身份终端被销毁**（`terminal close`，`ptyKilled: true`）：worker 仍跑完，两条路都通：
+  1. 旧 handle **依然可用于 `check`**——消息投递到 `to_handle: run:<run_id>`，
+     handle 仅用于解析 Run，终端死活不影响收信；
+  2. 新建终端 + `orca-ide orchestration run-use --id <run_id>`（**不需要 `--takeover-legacy`**），
+     `coordinator_handle` 改写、`consumer_generation` 递增，随后 ack 与 release 均成功。
+
+  → **worker 结果丢失的风险不成立。**
+  → 注：编排 skill 禁止 Lead 对 Root 的 Run 用 `run-use`（会挤掉现任协调者）。
+    此处是原协调者已死、本人恢复自己的 Run，属该命令的正当用途。
+
+#### ack 的正确字段
+
+用 `check` 返回结构的**顶层 `deliveryId`**，不是 `result.messages[].id`；
+用错返回 `stale_delivery`。
+
+#### 已撤回的先前结论
+
+早前曾报告「终端记录会累积、release 恒有缺口」。实测证伪——`terminal list` 在 GUI
+关闭时本就不列这些终端，GUI 一开全部正常显示；release 在 GUI 开启时正常工作。
+P1-C lineage lint 无需为此做例外处理。
 
 ---
 

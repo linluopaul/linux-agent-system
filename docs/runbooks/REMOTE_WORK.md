@@ -15,6 +15,14 @@ orca-ide status --json      # Orca 一律用 --json，带宽极低
 ——**必须用 `localhost`**，用主机名会白屏。
 **移动中**：手机 Orca app（连接模式选 local-only）；`/remote-control` 后手机可接管终端会话。
 
+**发编排任务（worker）前必做**——GUI 没开则 `worker-release` 必然失败：
+
+```bash
+orca-ide status --json | grep desktopWindowStatus       # 须为 available，否则跑下一条
+DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority orca-ide open --json
+export ORCA_TERMINAL_HANDLE=$(cat ~/.orca-root-handle)  # 协调者身份，须已落盘
+```
+
 ## 断线恢复
 
 任务不会因断线而死（daemon 独立存活）。重连后：
@@ -45,11 +53,12 @@ xrandr --query | grep -E "connected"      # 全是 disconnected → 显示器断
 gnome-shell --replace &                    # 显示器已接回但仍黑屏 → 合成器没重建，这条修
 ```
 
-## 其它故障
-
-更新失败、代理挂掉这两类的处置步骤见 `docs/NODES.md`「关键运行依赖」。
-
 ## 出行期风险策略
 
-⚠️ **`risk.yaml` 中尚无 `travel` profile**（`ROADMAP.md` P0-C 未完成）。
-在补上之前手动遵守：**不做 writable delegation**；Worker 只读、只跑测试、只出 patch 建议，集成待返回后进行。
+`.agent/policies/risk.yaml` → `profiles.active`，**当前 = `travel`**：禁止 writable
+delegation；Worker 只读、只跑测试、只出 patch 建议，集成待返回后做。
+回家后改回 `default`（或 P1-A 证完 Git Integration Contract，以先到者为准）。
+
+## 其它故障
+
+更新失败、代理挂掉见 `docs/NODES.md`「关键运行依赖」。

@@ -41,3 +41,42 @@ levels:
       - controller_security_and_safety_policy
     independent_review: required
     human_gate_may_be_required: true
+
+# ---------------------------------------------------------------------------
+# Operating profiles (ROADMAP P0-C).
+#
+# `levels` above classifies WORK. `profiles` below constrains the OPERATING
+# CONTEXT. `active` is the sole switch; changing it is a deliberate, reviewable
+# edit, not a verbal agreement.
+#
+# A profile may only ADD restrictions on top of `levels`. It must never weaken
+# independent review or remove a human gate.
+# ---------------------------------------------------------------------------
+profiles:
+  active: travel
+
+  default:
+    description: >
+      Operator is at the physical Desktop or on a stable link and can
+      intervene by hand. No restriction beyond `levels`.
+    writable_delegation: allowed
+
+  travel:
+    description: >
+      Operator is away from the Desktop: unstable network, small screen, and
+      no ability to intervene by hand if a delegation goes wrong.
+    rationale: >
+      The Lead <-> Worker Git Integration Contract (ARCHITECTURE.md §20) has
+      never been exercised by a real nested writable Worker; P1-A is the
+      unfinished proof. Carrying an unproven contract while unable to recover
+      by hand is the specific risk this profile removes.
+    writable_delegation: forbidden
+    worker_permissions:
+      - read_only
+      - run_tests
+      - produce_patch_suggestions_only
+    integration: deferred_until_operator_returns
+    exit_condition: >
+      Set `active: default` when the operator is back at the Desktop, or when
+      P1-A has proven the Git Integration Contract - whichever comes first.
+    reference: ROADMAP.md P0-C
