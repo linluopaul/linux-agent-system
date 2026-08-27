@@ -207,6 +207,34 @@ P1-C lineage lint 无需为此做例外处理。
 
 ---
 
+## 网络暴露面（2026-08-27 核对）
+
+`ufw` 默认策略：**deny (incoming) / allow (outgoing)**。绑在通配地址的服务与其**实际**可达范围：
+
+| 端口 | 服务 | 绑定 | ufw 规则 | 实际可达 |
+|---|---|---|---|---|
+| 22 | sshd | `0.0.0.0` + `[::]` | `ALLOW IN Anywhere` | **本地网段任意主机** + tailnet |
+| 3389 | gnome-remote-desktop | `*` | `ALLOW on tailscale0`，其余 `DENY` | 仅 tailnet |
+| 6768 | orca-ide | `0.0.0.0` | `ALLOW on tailscale0`，其余 `DENY` | 仅 tailnet |
+| 1053 | verge-mihomo DNS（TCP+UDP） | `*` | 无规则 → 落入 default deny | 仅 loopback |
+| 5900 / 6080 | x11vnc / novnc | `127.0.0.1` | 不需要 | 仅 loopback（经 `tailscale serve` 反代） |
+
+- 路由器**无端口转发**；未使用 `tailscale funnel`（`serve status` 标注 tailnet only）。
+- `1053` 虽双栈通配监听且以 root 运行，但无 allow 规则，外部（含 tailnet）不可达，无需补规则。
+
+### 22/tcp 未限制到 tailnet —— 有意保留
+
+这是唯一一个未收紧到 `tailscale0` 的入站端口。**保留而非收紧**，理由：
+
+- sshd 已 key-only、`PermitRootLogin no`、`PasswordAuthentication no`，局域网暴露风险低；
+- 收紧后将失去一条真实的恢复路径——**Tailscale 自身故障、但机器还活着、家里有人**时，
+  从局域网 SSH 进去修。出行期间已用到过家人协助（显示器故障那次）。
+
+> ⚠️ 若日后决定收紧：该动作可能切断当前访问，**必须在物理机前执行**，出行期间不得进行
+> （主文件 §0.3 红线）。
+
+---
+
 ## 安全策略变更（人已显式批准）
 
 | 变更 | 理由 | 代价 | 撤销 |
