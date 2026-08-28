@@ -430,7 +430,7 @@ The Execution Lead re-engages the Root only when:
 1. architecture materially changes
 2. acceptance criteria are ambiguous
 3. difficult diagnosis remains unresolved
-4. HIGH-risk independent review is required
+4. the review loop reaches its cap (3 cycles) without passing
 5. deterministic verification cannot resolve uncertainty
 6. execution is blocked by something outside the Execution Lead's authority—a protected
    human gate, a missing authorization or credential, an exhausted budget or concurrency
@@ -440,6 +440,12 @@ The Execution Lead re-engages the Root only when:
 This is a closed list. Each escalation is one specific question followed by one specific
 decision; routine implementation choices, failing tests, refactors, tooling problems and
 local design remain with the Lead.
+
+When review is required, the Lead arranges the Reviewer itself and runs the review/fix loop
+without returning to the Root for each cycle, executing the packet's
+`REVIEW MATERIAL CONTRACT` verbatim and preserving the reviewer's original findings in Orca
+so the Root can check them. The loop is capped at `retry.yaml` `review_loop.max_cycles`
+(3); on exhaustion the Lead stops editing and escalates under condition 4.
 
 Condition 6 is an authority escalation, not a cognitive re-entry. The Root routes it to
 the human gate or amends the packet without taking over implementation. If unresolved, the

@@ -775,7 +775,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn("GitHub", document)
 
         self.assertIn(
-            "Orca as the primary agent development environment and execution plane",
+            "Orca as the execution and review plane",
             agents,
         )
         self.assertIn("Herdr is not the default", agents)
@@ -882,21 +882,21 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "architecture materially changes",
             "acceptance criteria are ambiguous",
             "difficult diagnosis remains unresolved",
-            "HIGH-risk independent review is required",
+            "the review loop reaches its cap (3 cycles) without passing",
             "deterministic verification cannot resolve uncertainty",
             "execution is blocked by something outside the Execution Lead's authority—a "
             "protected human gate, a missing authorization or credential, an exhausted "
             "budget or concurrency limit, an unavailable required dependency, or "
             "acceptance criteria that are infeasible or mutually contradictory",
         )
+        # v3 (ADR-007): the LIVE canonical set is the three live documents. ADR-002 is a
+        # point-in-time record and is deliberately NOT updated, so it is no longer required
+        # to carry the live wording; its historical wording is pinned separately below.
         canonical_documents = {
             "AGENTS.md": read("AGENTS.md"),
             "docs/ARCHITECTURE.md": read("docs/ARCHITECTURE.md"),
             "docs/runbooks/ORCA_WORKFLOW.md": read(
                 "docs/runbooks/ORCA_WORKFLOW.md"
-            ),
-            "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md": read(
-                "docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md"
             ),
         }
         for path, document in canonical_documents.items():
@@ -904,6 +904,24 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn("closed", normalized.lower(), path)
             for condition in conditions:
                 self.assertIn(condition, normalized, path)
+
+        # Narrow historical-preservation assertion. ADR-002 must keep the PRE-v3 wording of
+        # condition 4 verbatim so the point-in-time record cannot be silently rewritten -
+        # and must NOT be read as current policy: ADR-007 supersedes condition 4, and the
+        # live wording must not have leaked into the ADR.
+        adr_002 = normalize(
+            read("docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md")
+        )
+        self.assertIn("Root re-entry is a closed list", adr_002)
+        self.assertIn("HIGH-risk independent review is required", adr_002)
+        self.assertNotIn(
+            "the review loop reaches its cap (3 cycles) without passing", adr_002
+        )
+        adr_007 = read("docs/decisions/ADR-007-review-loop-ownership.md")
+        self.assertIn("Status: Accepted", adr_007)
+        self.assertIn(
+            "the review loop reaches its cap (3 cycles) without passing", adr_007
+        )
 
         # Role files must reference the canonical list; each references AGENTS.md as the
         # single canonical full wording and never carries the whole six again.
@@ -963,6 +981,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 "ALLOWED CHANGED PATHS / SCOPE",
                 "VERIFICATION REQUIREMENTS",
                 "RESULT MODE",
+                "REVIEW MATERIAL CONTRACT",
                 "EXECUTION HARNESS",
                 "MODEL POLICY",
                 "CAPABILITY PROFILE",
@@ -1839,6 +1858,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "COMPACTION POLICY",
             "EXECUTION / RETRY BUDGET",
             "ESCALATION THRESHOLD",
+            "REVIEW MATERIAL CONTRACT",
         ):
             self.assertIn(field, agents)
             self.assertIn(field, architecture)
@@ -2258,7 +2278,7 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "architecture materially changes",
             "acceptance criteria are ambiguous",
             "difficult diagnosis remains unresolved",
-            "HIGH-risk independent review is required",
+            "the review loop reaches its cap (3 cycles) without passing",
             "deterministic verification cannot resolve uncertainty",
             "execution is blocked by something outside the Execution Lead's authority—a "
             "protected human gate, a missing authorization or credential, an exhausted "
@@ -2325,6 +2345,91 @@ class ArchitecturePolicyTests(unittest.TestCase):
         risk = self.load_yaml(".agent/policies/risk.yaml")
         self.assertEqual("conditional", risk["levels"]["medium"]["independent_review"])
         self.assertEqual("required", risk["levels"]["high"]["independent_review"])
+
+        # v3 (ADR-007): the Lead-owned review/fix loop has a hard ceiling here. The ceiling
+        # bounds a loop that risk.yaml has already required; the assertNotIn above still
+        # proves this file cannot make review required itself.
+        loop = retry["review_loop"]
+        self.assertEqual(3, loop["max_cycles"])
+        self.assertEqual("stop_and_return_to_root", loop["on_exhaustion"])
+        self.assertFalse(loop["lead_may_continue_editing_after_exhaustion"])
+
+    def test_review_triggers_resolve_conditional_without_weakening_high(self) -> None:
+        """E-1: risk.yaml carries a deterministic review-trigger procedure that resolves
+        `levels.medium.independent_review: conditional`, and it may only ADD review.
+
+        The defect class this closes is drift: an unresolved `conditional` is re-argued on
+        every task and the re-argument drifts loose. The second defect class is a subtler
+        one - a trigger list read as EXHAUSTIVE would silently exempt HIGH work that
+        matches none of the four categories. Both are asserted below.
+        """
+        risk = self.load_yaml(".agent/policies/risk.yaml")
+        triggers = risk["review_triggers"]
+
+        # 1. All four categories exist and each one REQUIRES review.
+        categories = triggers["categories"]
+        self.assertEqual(
+            [
+                "money_movement",
+                "data_mutation",
+                "permissions_and_credentials",
+                "destructive_operations",
+            ],
+            list(categories),
+        )
+        for name, category in categories.items():
+            self.assertTrue(category["requires_independent_review"], name)
+            self.assertTrue(category["matches"], name)
+
+        # 2. Direction is add-only, and the procedure is bound to the state it resolves.
+        self.assertTrue(triggers["may_only_add"])
+        self.assertTrue(triggers["never_reduces_level_requirement"])
+        self.assertEqual("levels.medium.independent_review", triggers["resolves"])
+        self.assertEqual(
+            "level_requirement_first_then_triggers", triggers["precedence"]
+        )
+
+        # 3. HIGH keeps its own requirement, independent of any trigger match.
+        self.assertEqual("required", risk["levels"]["high"]["independent_review"])
+        self.assertEqual("conditional", risk["levels"]["medium"]["independent_review"])
+
+        # 4. The concrete anti-downgrade cases: HIGH examples that need not match any
+        #    category above must remain HIGH, so the fallback can never reach them.
+        high_examples = risk["levels"]["high"]["examples"]
+        for example in (
+            "backtesting",
+            "look_ahead_sensitive_logic",
+            "adjustment_factor_logic",
+        ):
+            self.assertIn(example, high_examples, example)
+
+        # 5. The fallback is gated on BOTH conditions and never overrides a level.
+        otherwise = triggers["otherwise"]
+        self.assertEqual(
+            "no_level_requirement_and_no_category_match", otherwise["condition"]
+        )
+        self.assertEqual("not_required_by_trigger", otherwise["independent_review"])
+        self.assertIn("tests_must_still_run_and_pass", otherwise["then"])
+        self.assertIn("already requires review", otherwise["note"])
+
+        # 6. destructive_operations is general, not migration-only.
+        destructive = categories["destructive_operations"]["matches"]
+        self.assertIn("destructive_migrations", destructive)
+        self.assertGreater(
+            len([m for m in destructive if m != "destructive_migrations"]),
+            1,
+            "destructive_operations must cover general destruction, not only migrations",
+        )
+
+        # 7. Human-gate overlaps are pointers, never a competing second rule.
+        for name in ("permissions_and_credentials", "destructive_operations"):
+            reference = categories[name]["human_gate_reference"]
+            self.assertIn("AGENTS.md", reference, name)
+            self.assertIn("does not restate or relax", reference, name)
+
+        # 8. The architecture doc points at this procedure instead of re-deciding.
+        architecture = read("docs/ARCHITECTURE.md")
+        self.assertIn("`review_triggers`", architecture)
 
     def test_writable_conditional_block_is_mandatory_when_used(self) -> None:
         """CORE/CONDITIONAL: conditionality is not optionality — when writable delegation

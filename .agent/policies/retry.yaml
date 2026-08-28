@@ -25,6 +25,18 @@
 # It must never make review required itself, and HIGH-risk work is governed by risk.yaml
 # (which may justify more review, never fewer). Unlimited review/fix loops are forbidden.
 
+# Review loop ceiling (v3). The Execution Lead arranges the review itself and runs the
+# review/fix/re-review loop without returning to the Root for each cycle. This ceiling is
+# the hard cap on that loop for ANY risk level. It does not decide whether review happens
+# (risk.yaml alone decides that); it only bounds a loop that has already been required.
+# On exhaustion the Lead MUST stop editing and re-engage the Root under closed re-entry
+# condition 4. Per-level budgets below may be tighter than this ceiling, never looser.
+review_loop:
+  max_cycles: 3
+  counts: one_review_pass_plus_the_fix_that_answers_it
+  on_exhaustion: stop_and_return_to_root
+  lead_may_continue_editing_after_exhaustion: false
+
 # Root's options on exhaustion of the MEDIUM budget: continue the current harness, change
 # strategy, escalate to Codex Premium, or amend acceptance/tests.
 review_budget:
