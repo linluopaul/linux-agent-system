@@ -18,7 +18,9 @@
 系统必须保持以下不变量：
 
 - GitHub 是 durable system of record；
-- Orca 是默认的 ADE、执行、隔离、协作和编排平面；
+- Orca 是**执行与复核**平面；
+- Orca GUI 须处于 `available` 状态，否则无法完成 dispatch 与 release；
+- Root 的 Orca 身份 handle 必须落盘，可在 shell 或身份终端丢失后恢复；
 - 一个 task outcome 只有一个 Root owner；
 - Execution Lead 只获得 bounded execution authority，不接管 outcome ownership；
 - Root / Execution Lead / Worker / Reviewer 是动态角色，不与 provider 永久绑定；
@@ -40,12 +42,13 @@
 ## 2. 总体架构
 
 ```text
-                                  Human
+                              人「我想做 X」
                    goals / authorization / human gates
                                     │
                                     ▼
                  Root / Cognitive Control Plane
               Claude Code harness default / capable pool
+       carrier: tmux session + terminal Claude Code, NOT an Orca worktree
  requirements / goal / architecture / acceptance / risk / constraints
  reconnaissance strategy / Execution Packet / ambiguity / escalation
                          final outcome accountability
@@ -68,12 +71,14 @@
 
  Runtime and durable planes:
  GitHub System of Record ← commits / PRs / issues / policies / evidence
+                          （出口 / 记录，非入口）
           │
  Thin Python Controller: polling / risk+budget / node / metrics / gates
           │ delegates deterministic runtime effects
           ▼
- Orca: ADE / worktrees / terminals / local+SSH / collaboration /
-       orchestration / completion tracking
+ Orca: execution and review plane — worktrees / terminals / local+SSH /
+       collaboration / orchestration / completion tracking
+       precondition: desktopWindowStatus == available
           │
  Local Node / Connected Node / Future Nodes → Tests / Evals / CI
 
@@ -135,9 +140,13 @@ Orca message、terminal output 或 agent transcript 中出现的长期有效知�
 Issue comment、commit、doc、ADR、test、eval 或 policy。完整 transcript 默认不作为
 未来 task context。
 
-### 3.3 Orca：Primary ADE and Runtime Plane
+GitHub 是**出口**而非入口。任务起点是人的需求陈述与 Root 讨论；从 Issue 开始意味着
+需求已被写过一遍，而那一步正是最重的一段。record 地位不变，仅失去入口地位。
 
-Orca 默认负责六类 deterministic runtime capability。
+### 3.3 Orca：Execution and Review Plane
+
+Orca 默认负责六类 deterministic runtime capability；这六类能力共同的运行前提见下方
+「GUI 运行时前提」，该小节是前提，不是第七类 capability。
 
 #### ADE 与 workspace
 
@@ -145,6 +154,29 @@ Orca 默认负责六类 deterministic runtime capability。
 - worktree 视图和状态；
 - terminal、tab、pane 和 Agent session；
 - 本地开发与验证入口。
+
+**Root 的 workspace 不再由 Orca 提供。** Root 运行在普通终端（tmux 会话）内的主仓库
+checkout 中，不占用 Orca worktree：Orca GUI 是派活的硬前提，Root 在 Orca 内则 Orca
+崩溃时讨论上下文一并丢失；Root 不写代码，不需要隔离的 working directory；Root 寿命
+跨越多个 task，而 Orca 的终端与 worktree 跟着单个 task 走。Orca 仍为 Execution Lead、
+Worker 与 Reviewer 提供 workspace。
+
+#### GUI 运行时前提
+
+[实测，两轮独立复现] Orca GUI 必须常驻。`desktopWindowStatus` 不是 `available` 时，
+dispatch 与 release 无法完成：
+
+| GUI 状态 | 终端 surface | `worker-release` |
+|---|---|---|
+| 关（`openable`） | `background` | ❌ `release_unknown` / `tab_not_found` |
+| 开（`available`） | `visible` | ✅ `released` / `closed_agent_terminal` |
+
+原因：release 的清理动作是关闭 worker 的 UI tab；GUI 关闭时创建的终端从来没有 tab。
+已排除：ack / release 顺序与此无关。已撤回：早前报告的「终端记录累积」，实测证伪。
+
+因此派活前必须自检 `desktopWindowStatus == available`，无人值守节点的恢复链是
+`断电 → BIOS 自启 → 自动登录 → 图形会话 → GUI 起来 → available → 才能派活`；链条上
+任一环断掉，远端就只能读不能派。该链路的端到端验证见 §20。
 
 #### Git-worktree isolation
 
@@ -217,6 +249,24 @@ Orca CLI grammar 会随版本演进。Agent 在运行 Orca command 前必须：
 在 Orca-managed terminal 中通常使用 `orca`。Linux 普通 shell 通常使用
 `orca-ide`，避免误启动 GNOME Orca screen reader。最终选择以安装 skill 为准。
 
+**身份要求。** `check` / `inbox` / `worker-release` 不接受 `--from`，协调者身份来自
+调用它的 Orca 注册终端。Root 运行在普通终端内，因此必须先创建一个空的 coordinator
+终端作为身份载体，并把 handle 落盘（例如 `~/.orca-root-handle`），以便 shell 或身份
+终端丢失后恢复。该终端内不运行任何东西，但必须保持存在。
+
+[实测] 身份与连接均可恢复：shell 死掉（网断 / SSH 掉 / tmux 被杀）不影响终端，worker
+由 daemon 托管继续运行，新 shell 恢复 handle 后 `run-current` 与 `check --wait` 正常；
+身份终端被销毁时，旧 handle 仍可用于 `check`，或新建终端后用 `run-use` 接管。编排
+skill 禁止 Execution Lead 对 Root 的 Run 使用 `run-use`；此处是原协调者已死、本人恢复
+自己的 Run，属正当用途。
+
+**已确认的 CLI 细节** [实测]：
+
+1. ack 使用 `check` 返回结构的**顶层 `deliveryId`**，不是 `result.messages[].id`；
+2. `worker-start` 必须显式指定 base；
+3. 收信使用 `check --wait` 长等待，不做 sleep 轮询；
+4. 不得用 `terminal close` 替代 `worker-release`。
+
 ### 3.4 Orca 不承担的职责
 
 Orca 不替代：
@@ -268,6 +318,10 @@ Orchestration settlement；但不复制实现以下能力：
 
 Herdr 不再是默认 execution / communication plane，也不是 Orca 失败时的静默
 fallback。
+
+[实测] 撤回「shell 死则 agent 死」这一前提：Orca 终端由 daemon 托管，shell 死掉
+（网断 / SSH 掉 / tmux 被杀）不影响终端与 worker。tmux 的作用是保护 Root 自身的
+会话，不是保护 agent 存活。Herdr 的定位不因此改变，仍是可选基础设施，且不得静默切换。
 
 只有未来 workload 明确需要 detached 或 persistent long-running terminal session，
 并且 Orca 的正常 Agent terminal lifecycle 不适合时，才考虑 Herdr。例如超出 task
@@ -612,7 +666,7 @@ acceptance criteria 满足，只能在以下六种情况 re-engage Root：
 1. architecture materially changes
 2. acceptance criteria are ambiguous
 3. difficult diagnosis remains unresolved
-4. HIGH-risk independent review is required
+4. the review loop reaches its cap (3 cycles) without passing
 5. deterministic verification cannot resolve uncertainty
 6. execution is blocked by something outside the Execution Lead's authority—a protected
    human gate, a missing authorization or credential, an exhausted budget or concurrency
@@ -670,6 +724,35 @@ session 也不算 independent。HIGH-risk work 在有 capable alternative 时必
 implementer 的 provider review；没有 alternative 时，必须在 human-visible task record
 中保存接受 residual same-provider correlation risk 的明确 waiver。
 
+#### review/fix loop 的归属（v3）
+
+复核循环归 Execution Lead：Lead 自行启动 Reviewer，findings 回到 Lead 修改，循环到通过；
+Root 只在最后拍板。`risk.yaml` 仍是「是否需要复核」的唯一权威，本变更只改「谁运行这个
+循环」，不改「什么时候必须复核」。
+
+**代价必须写明**：实现方在决定复核方看到什么材料。这是对本节与 §8.3 独立性要求的实质
+弱化（记录见 ADR-007）。因此设三条防护，缺一不可：
+
+1. **复核原始结论保留在 Orca。** Root 拿到的摘要必须可回溯核对，不能只由 Lead 转述。
+2. **循环上限 3 轮**（`.agent/policies/retry.yaml` 的 `review_loop.max_cycles`）。超限后
+   Lead 不得继续修改，必须按 closed re-entry condition 4 停下回 Root。
+3. **复核材料契约由 Root 在 Execution Packet 的 `REVIEW MATERIAL CONTRACT` 字段中预先
+   固定**（§10）。Lead 执行该契约，不得自行重新定义。
+
+三条不可互相替代：
+
+| 失效模式 | 被哪条挡住 |
+|---|---|
+| Lead 反复微调，改到 Reviewer 不再反对 | 第 2 条 |
+| Lead 给出局部 diff / 漏文件，第一轮就静默通过 | 第 3 条 |
+| Lead 转述时软化 findings | 第 1 条 |
+
+轮次上限是天花板，材料契约是地板。**残余风险**：Lead 是否真的按契约提供了完整材料——这
+不由文档保证，需在 settlement evidence 中核查。
+
+Root session 内与其它模型的讨论（例如经 MCP 的 GPT）**不构成 independent review**：它读
+的是 Root 写的问题陈述，用的是同一框架，不满足 fresh-session context independence。
+
 ### 6.5 Platform Steward
 
 Platform Steward 管系统改进而不是单个 product outcome：
@@ -678,7 +761,7 @@ Platform Steward 管系统改进而不是单个 product outcome：
 - retry / failure classes；
 - review yield；
 - cost pressure；
-- `root_vs_execution_usage_share` 和 Root-heavy drift；
+- `execution_vs_root_usage_share` 和 Root-heavy drift；
 - node utilization；
 - routing / skill / test / Controller improvements；
 - Platform Kanban。
@@ -708,9 +791,9 @@ Platform Steward 不成为每个 Root 的审批层，也不能自行放宽 human
 
 Harness class、model/provider pool 与 capability profile 都是 runtime 选的，可以被
 availability、capability、budget、independence 或 task evidence 覆盖。只有 ROLE 是
-invariant。Pi 是 harness，其模型 runtime 选中，不是固定模型。此抽象保留了未来
-long-lived Pi Supervisor（Orca observation/control、Git/GitHub、system inspection、
-SSH、Tailscale、approval gates）的空间，但没有在此实现。
+invariant。Pi 是 harness，其模型 runtime 选中，不是固定模型。**长期存活 supervisor 的
+形态已由 ADR-006（`docs/decisions/ADR-006-hermes-retirement.md`）否决，不再为其保留
+抽象空间。**
 
 ---
 
@@ -818,9 +901,9 @@ quota，不能削弱 acceptance criteria、HIGH-risk safeguards、independence �
 ### 7.4 capability profile
 
 `.agent/policies/capabilities.yaml` 定义命名 profile 与 least-capability /
-progressive-disclosure 规则；assignment 只声明 task-relevant capability。此抽象保留未
-来 long-lived Pi Supervisor 的空间（Orca observation/control、Git/GitHub、system
-inspection、SSH、Tailscale、approval gates），但没有实现。
+progressive-disclosure 规则；assignment 只声明 task-relevant capability。**长期存活
+supervisor 的形态已由 ADR-006（`docs/decisions/ADR-006-hermes-retirement.md`）否决，
+不再为其保留抽象空间。**
 
 ---
 
@@ -832,8 +915,13 @@ inspection、SSH、Tailscale、approval gates），但没有实现。
 
 ### 8.2 MEDIUM
 
-普通 feature、跨模块 bug、中等 refactor、API integration。独立 Review 按
-uncertainty、blast radius 和 test quality 触发。
+普通 feature、跨模块 bug、中等 refactor、API integration。是否需要独立 Review 由
+level requirement 与 `.agent/policies/risk.yaml` 的 `review_triggers` 共同决定，
+不逐任务现判；triggers 只增不减，永不降低 §8.3 已要求的 review。
+
+uncertainty、blast radius 和 test quality 是 risk classification 与 verification
+planning 的考虑因素——用来判断任务属于哪一级、需要哪些 tests/evals——**不是**独立
+Review 的临场触发器。Root 与 Execution Lead 都不得据此自行决定是否复核。
 
 ### 8.3 HIGH
 
@@ -867,7 +955,9 @@ Review packet 只能提供 original task、acceptance criteria、diff / commit�
 verification evidence、relevant docs 和 risk level。不得提供 Root private reasoning、
 Root transcript、Execution Packet rationale 或 Root 对自身 design 的辩护。A Root
 session cannot review itself；任何携带 Root context 的 session 都不满足
-independence。
+independence。这两组内容由 Root 在 Execution Packet 的 `REVIEW MATERIAL CONTRACT`
+字段中预先固定（§10）；Lead 安排复核时执行该契约，不得自行取舍。复核循环由 Lead 运行，
+上限见 §6.4 与 `retry.yaml`。
 
 同 provider 的 fresh session 可以减少 anchoring，但不能消除 model-level correlated
 blind spots，因此只在没有 capable alternative 且 human-visible record 明确接受
@@ -951,6 +1041,7 @@ INTEGRATION_BASE_SHA
 ALLOWED CHANGED PATHS / SCOPE
 VERIFICATION REQUIREMENTS
 RESULT MODE
+REVIEW MATERIAL CONTRACT
 EXECUTION HARNESS
 MODEL POLICY
 CAPABILITY PROFILE
@@ -979,7 +1070,13 @@ Packet fields 的语义：
 - `VERIFICATION EVIDENCE REQUIRED`：result 中必须保留的 commands、outputs、mapping 与
   uncertainty；
 - `RESULT MODE`：Lead 对 Root 返回的 immutable unit；V1 writable Git work 使用 ordered
-  linear Git commit list。
+  linear Git commit list；
+- `REVIEW MATERIAL CONTRACT`：任务需要 independent review 时 mandatory。由 Root 预先固定
+  Reviewer **应当收到**（original goal / task、acceptance criteria、diff / commit、
+  verification evidence、risk level、relevant docs）与**不得收到**（Root private reasoning、
+  Execution Packet rationale、implementer reasoning 或长篇实现辩护）两组内容。Lead 自行
+  安排复核时执行该契约，不得增删；这条把「Lead 决定复核方看什么」变成「Lead 执行 Root
+  定义的契约」，是 §6.4 三条防护中的第 3 条。
 
 新增字段选择 Lead 的 harness 与模型策略、能力与效率边界：
 
@@ -1158,9 +1255,10 @@ verification evidence durable 后才清理 temporary refs。
 
 Execution Lead 在 acceptance 满足或 definitive blocker 前保持 edit/verify/fix loop，
 并按 active preamble 只发送一次 `worker_done`。Root 收到的是 compressed evidence，
-不是 transcript 或 reasoning dump。HIGH-risk review required 是 closed re-entry
-condition：Root 提供 bounded review decision / findings 后，implementation fix loop 仍由
-Execution Lead 完成。
+不是 transcript 或 reasoning dump。需要复核时由 Execution Lead 自行安排 Reviewer 并运行
+review/fix loop，不为每一轮返回 Root；只有该 loop 达到 `retry.yaml` 的 `review_loop`
+上限（3 轮）仍未通过时，才构成 closed re-entry condition 4。Root 提供 bounded decision
+后，implementation fix loop 仍由 Execution Lead 完成。
 
 如果 Execution Lead mid-flight failure，Root 作为 parent Run coordinator 负责确认
 parent Dispatch 状态、执行 current guide 的 stop/retry recovery 并启动 replacement
@@ -1386,6 +1484,10 @@ window 的 `execution_share >= 65%` 是当前 drift target；低于 threshold �
 scope、Root reconnaissance、polling frequency 和 implementation-loop ownership 的
 检查。metric invariant 始终按 role 计算，不依赖具体 harness 或 pool。
 
+> `SUSPENDED（2026-08-27）— 口径随 v3 流程变更失效：讨论成为入口且全部发生在 Root
+> 侧，该指标会持续低于阈值但原因不是 Root micromanagement。待新流程跑出 10 个 task
+> 样本后重新标定。`
+
 `premium_vs_low_cost_execution_share` 衡量 execution 内部低成本与 premium 的构成：
 
 - `premium_execution_units`：premium harness / pool（例如 Codex Premium Lead、Claude
@@ -1576,6 +1678,9 @@ manual-workflow skeleton：
 - Lead ↔ Worker Git Integration Contract v1 已写入 architecture、roles、runbook 与
   policy tests；还需用真实 nested writable Worker 重跑 base-alignment、ordered
   cherry-pick、conflict 和 remote-ref smoke cases；
+- Orca GUI 常驻前提在断电重启后的无人值守恢复（自动登录 → 图形会话 → GUI 起来 →
+  `available` → 能完整派一次活）尚未端到端跑通，需带 in-flight worker 验证；见
+  `ROADMAP.md` P0-D；
 - 尚无需要 Herdr 的已验证 workload；
 - GitHub Issue/Kanban 自动同步尚待 Controller V1。
 
@@ -1606,6 +1711,13 @@ Repository references：
 - `.agent/policies/risk.yaml`；
 - `docs/decisions/ADR-001-orca-first-execution-plane.md`；
 - `docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md`；
+- `docs/decisions/ADR-003-lead-worker-git-integration-contract.md`；
+- `docs/decisions/ADR-004-role-harness-model-capability-separation.md`；
+- `docs/decisions/ADR-005-instruction-diet-and-adaptive-premium-reasoning.md`；
+- `docs/decisions/ADR-006-hermes-retirement.md`；
+- `docs/decisions/ADR-007-review-loop-ownership.md`；
+- `docs/ROADMAP.md`；
+- `docs/HISTORY.md`；
 - `docs/runbooks/ORCA_WORKFLOW.md`；
 - `tests/test_architecture_policy.py`。
 

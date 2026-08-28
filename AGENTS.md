@@ -6,7 +6,7 @@ and runbooks; do not restate them here.
 ## Project Purpose
 
 This repository defines and operates a durable multi-agent development system on Linux:
-GitHub as the durable system of record; Orca as the primary agent development environment and execution plane;
+GitHub as the durable system of record; Orca as the execution and review plane;
 Orca-managed Git worktrees for task isolation; Orca CLI
 and Orchestration for agent launch, collaboration and completion tracking; Claude, Codex,
 DeepSeek and future providers as replaceable agent models; a thin Python Controller for
@@ -66,7 +66,8 @@ CORE: `GOAL`, `BACKGROUND / PROBLEM STATEMENT`, `ACCEPTANCE CRITERIA`,
 
 CONDITIONAL — when writable delegation is used, the writable block is mandatory:
 `WORKTREE / BASE COMMIT`, `LEAD BRANCH`, `INTEGRATION_BASE_SHA`,
-`ALLOWED CHANGED PATHS / SCOPE`, `VERIFICATION REQUIREMENTS`, `RESULT MODE`; an
+`ALLOWED CHANGED PATHS / SCOPE`, `VERIFICATION REQUIREMENTS`, `RESULT MODE`; when the task
+requires independent review, `REVIEW MATERIAL CONTRACT` is mandatory; an
 independent-review and premium budget envelope under `MODEL POLICY` / `BUDGET / HUMAN GATES`;
 specialized `CAPABILITY PROFILE` grants (`.agent/policies/capabilities.yaml`); and
 remote/system-operation fields.
@@ -75,7 +76,10 @@ Git field semantics: `WORKTREE / BASE COMMIT` = placement plus **source ref**;
 `LEAD BRANCH` = **target branch**; `INTEGRATION_BASE_SHA` = immutable commit the Lead
 must exactly match before any tracked edit; `ALLOWED CHANGED PATHS / SCOPE` = **path
 boundary**; `VERIFICATION REQUIREMENTS` = base, ancestry, scope, **integrated-state**
-gates; `RESULT MODE` = **immutable unit**.
+gates; `RESULT MODE` = **immutable unit**. `REVIEW MATERIAL CONTRACT` = the Root-fixed list
+of what the reviewer receives (goal, acceptance criteria, diff/commit, verification evidence,
+risk level, relevant docs) and what it must never receive (Root private reasoning, packet
+rationale, implementer reasoning); the Lead executes it and may never redefine it.
 
 Agent-to-agent reports use the terse `STATUS / CHANGED / VERIFY / COMMIT / BLOCKERS /
 UNCERTAINTY / NEXT` block and never narrate routine tool usage, except clarity overrides
@@ -87,7 +91,7 @@ when one of these six conditions applies:
 1. architecture materially changes
 2. acceptance criteria are ambiguous
 3. difficult diagnosis remains unresolved
-4. HIGH-risk independent review is required
+4. the review loop reaches its cap (3 cycles) without passing
 5. deterministic verification cannot resolve uncertainty
 6. execution is blocked by something outside the Execution Lead's authority—a protected
    human gate, a missing authorization or credential, an exhausted budget or concurrency
@@ -124,7 +128,10 @@ loop — it never takes the loop over. Herdr is not the default execution plane.
 Tasks are LOW, MEDIUM or HIGH; `risk.yaml` is the sole authority for whether independent
 review is required. HIGH-risk work requires independent verification. Never claim a test or
 evaluation passed unless it was actually executed; do not weaken tests to make them pass;
-prefer executable verification over prose review. Review independence means fresh-session context independence
+prefer executable verification over prose review. The Execution Lead arranges the required
+review itself and owns the review/fix loop within the `retry.yaml` review-loop ceiling; the
+Root rules on the final result, not on each cycle.
+Review independence means fresh-session context independence
 — the reviewer runs in its own worktree/terminal with no Root context
 and never receives the Root's private reasoning, Execution Packet rationale, implementer
 reasoning, or the Root's defense. A Root session must never review its own work; any session

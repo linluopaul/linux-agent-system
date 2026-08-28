@@ -43,6 +43,94 @@ levels:
     human_gate_may_be_required: true
 
 # ---------------------------------------------------------------------------
+# Review triggers (ROADMAP P0-E / E-1).
+#
+# WHY. `levels.medium.independent_review` is `conditional` - an unresolved state that
+# forces a fresh judgement on every task. A judgement made fresh each time drifts, and it
+# drifts loose. This block is the deterministic procedure that resolves `conditional`, so
+# the decision is configured once, is diffable, and is not re-argued per task.
+#
+# AUTHORITY. risk.yaml remains the SOLE authority for WHETHER independent review is
+# required. `routing.yaml` still carries a legacy per-level mirror of `independent_review`;
+# that mirror is scheduled for removal and is NOT a second source of truth.
+#
+# DIRECTION - triggers may only ADD:
+#   * a trigger can only make review REQUIRED where it was not already required;
+#   * a trigger can NEVER lower, waive or narrow a requirement already set by `levels`;
+#   * `levels.high.independent_review: required` always wins. A HIGH task that matches
+#     none of the categories below is STILL review-required. backtesting,
+#     look_ahead_sensitive_logic and adjustment_factor_logic are the concrete cases:
+#     they are HIGH, they need not match any category here, and they are never exempt.
+#
+# FALLBACK. "otherwise, passing tests are enough" means exactly one thing: the task is not
+# already required to have review by its risk level AND it matches no category below. It
+# never means "a HIGH task that matched no category is exempt".
+#
+# ENFORCEMENT. No code reads this file yet (see PROJECT_STATE.md). Configuring the rule
+# removes the per-task judgement and makes drift visible in diff; it does not stop an agent
+# that never reads the policy. Do not read "configured" as "enforced".
+# ---------------------------------------------------------------------------
+review_triggers:
+  may_only_add: true
+  never_reduces_level_requirement: true
+  resolves: levels.medium.independent_review
+  precedence: level_requirement_first_then_triggers
+
+  categories:
+    money_movement:
+      requires_independent_review: true
+      matches:
+        - order_execution
+        - pnl_calculation
+        - position_and_risk_calculation
+        - trading_signals
+        - capital_allocation_or_transfer
+        - fee_or_pricing_logic
+
+    data_mutation:
+      requires_independent_review: true
+      matches:
+        - market_data_transformations
+        - schema_or_migration_changes
+        - historical_data_rewrite
+        - dataset_ingestion_or_correction
+        - persisted_state_format_changes
+
+    permissions_and_credentials:
+      requires_independent_review: true
+      matches:
+        - authentication_and_authorization
+        - access_scope_or_role_grants
+        - secret_or_credential_handling
+        - controller_security_and_safety_policy
+      human_gate_reference: >
+        Secret and credential protections are a protected human gate in AGENTS.md.
+        This category routes such work to review; it does not restate or relax that gate.
+
+    destructive_operations:
+      requires_independent_review: true
+      description: >
+        Any irreversible removal or revocation, not only schema migrations.
+      matches:
+        - destructive_migrations
+        - deleting_production_or_source_data
+        - irreversible_file_or_directory_removal
+        - force_deleting_branches_worktrees_or_refs
+        - revoking_or_rotating_credentials
+        - reducing_or_purging_backups
+      human_gate_reference: >
+        Minimum backup retention and destructive data-access restrictions are protected
+        human gates in AGENTS.md. This category routes such work to review; it does not
+        restate or relax those gates.
+
+  otherwise:
+    condition: no_level_requirement_and_no_category_match
+    independent_review: not_required_by_trigger
+    then: required_tests_must_still_run_and_pass
+    note: >
+      This branch never applies to a task whose risk level already requires review.
+
+# ---------------------------------------------------------------------------
 # Operating profiles (ROADMAP P0-C).
 #
 # `levels` above classifies WORK. `profiles` below constrains the OPERATING

@@ -26,6 +26,7 @@
 | A-7 | 图形界面访问 | ⚠️ **一半完成** | Orca IDE 经 RDP ✅；**起草助手 Web UI 未做**，随 P0-B 交付 |
 | — | Phase 5（Home Laptop） | ❌ **未执行** | 人已决定推迟到回家。`NODES.md` 标「尚未建立」 |
 | P0-C | 出行期风险策略 | ✅ 完成（走**兜底**路径） | `.agent/policies/risk.yaml` → `profiles.active: travel` |
+| P0-D-0 | 自动登录 + GUI 常驻机制 | ✅ VERIFIED | `NODES.md` §安全策略变更、§Orca GUI 常驻；`infra/desktop/` |
 
 **A-7 的准确边界**：ROADMAP 对 A-7 的定义含两半——「Orca IDE 可经 A-6 操作」与
 「起草助手的轻量 Web UI 经 `tailscale serve` 暴露」。前者已验；后者依赖 P0-B 的产物，
@@ -62,6 +63,8 @@ P0-B 尚未开始。**重构时不要把 A-7 整体记为已完成。**
 | **Zellij** | 试用后删除 | 观感不合；默认快捷键与 Claude Code 多处冲突 |
 | **node registry** | 不建机器可读版本 | 归属 Controller V2，由 scheduler 实际需求触发 |
 | **22/tcp 暴露范围** | 保留局域网可达，不收紧 | 保住「Tailscale 故障 + 家中有人」时的恢复路径。收紧须在物理机前操作 |
+| **自动登录** | 已启用（人已批准，2026-08-27 实测） | 密码 / sudo / 锁屏均保留。记录见 `NODES.md`。撤销即失去无人值守恢复能力 |
+| **Orca GUI 常驻** | autostart + 看门狗 timer，配置在 `infra/desktop/` | 判断存活只能用 `desktopWindowStatus`，不能用 `pgrep` |
 
 ### 已排除的方案（附理由，见 `NODES.md` §已排除的方案）
 
@@ -78,9 +81,10 @@ Desktop（与向日葵同类，换牌子不解决问题）。
 
 | 约束 | 后果 | 处置 |
 |---|---|---|
-| **Orca GUI 必须开着** | GUI 关闭时 CLI 建的终端 `surface=background`、无 UI tab，`worker-release` 必然 `tab_not_found` | 发 worker 前查 `desktopWindowStatus` 须为 `available` |
+| **Orca GUI 必须开着** | GUI 关闭时 CLI 建的终端 `surface=background`、无 UI tab，`worker-release` 必然 `tab_not_found` | **已由 autostart + 看门狗自动保持**（`infra/desktop/`，2026-08-27 实测）。发 worker 前仍应查 `desktopWindowStatus`；异常时先看 `~/.orca-gui-watch.log` 的 status 值 |
 | **协调者 handle 必须落盘** | 断线后无 handle 即无法接回 Run | `~/.orca-root-handle`；`check`/`inbox`/`worker-release` 都不接受 `--from` |
 | **ack 用顶层 `deliveryId`** | 用 `messages[].id` 会返回 `stale_delivery` | — |
+| **daemon 与 GUI 生命周期独立** | 图形层崩溃（GUI 被杀、`restart gdm3`）不影响 daemon 与 Orca 管理的 shell | 实测 2026-08-27：daemon PID 8054（8/26 21:57 启动）跨 gdm restart 与两次 GUI 重建存活；worker shell 同样存活。**整机断电场景仍未验证** |
 
 实测细节与四组对照实验见 `NODES.md` §Orchestration 边界结论。
 
@@ -114,6 +118,7 @@ P1-C 的 lineage lint **不需要**为此做例外处理。
 
 | 项 | 阻塞条件 | 解除时机 |
 |---|---|---|
+| **P0-D 冷启动全链验证** | 需人在物理机与显示器前（断电 / 拔电源） | 回家 |
 | **Phase 5（Home Laptop）** | 需人在笔记本跟前（改 logind + 双会话协议） | 回家 |
 | **`profiles.active` 回切 `default`** | 人回到 Desktop，或 P1-A 证完 Git Integration Contract | 以先到者为准 |
 | **22/tcp 是否收紧** | 收紧动作可能切断现网访问，须在物理机前执行 | 回家（红线：出行期禁止） |
@@ -153,4 +158,6 @@ P1-C 的 lineage lint **不需要**为此做例外处理。
 | `NODES.md` | 各节点的硬件、能力、实测证据、安全策略变更记录、暴露面 |
 | `runbooks/REMOTE_WORK.md` | 在外每天照做的操作，限一屏 |
 | `ARCHITECTURE.md` / `decisions/ADR-*.md` | 架构契约。改动须走 ADR |
+| `ROADMAP.md` | 未完成项的目标、验收标准、不做什么。**不设状态表**——状态归本文 §1 |
+| `HISTORY.md` | 废弃设计与否决理由、已证伪的说法、词汇变更。与本文 §2 的分工：§2 记现行方案的约束，HISTORY 记不采用方案的理由 |
 | `.agent/policies/*.yaml` | 机器可读策略。`risk.yaml` 对 review / gate 具 authority |

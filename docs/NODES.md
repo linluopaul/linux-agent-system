@@ -85,6 +85,23 @@ x11vnc 直接抓 X root window，**不依赖物理显示器**：
 - **Orca connected environment（含义 B）**：Home Laptop **尚未注册**。
 - `orca-serve.service`（user-scope）已设为随图形会话自启，提供 headless runtime。
 
+### Orca GUI 常驻（2026-08-27）
+
+配置文件在 `infra/desktop/`，安装用 `bash infra/desktop/install.sh`。
+**不要只在本机改**——本轮已出现过一次配置 bug 需要迭代。
+
+| 机制 | 作用 | 实测 |
+|---|---|---|
+| autostart | 登录后自动拉起 GUI | ✅ 会话建立后 2 秒内 GUI 起来 |
+| 看门狗 timer | 每 5 分钟检查，非 available 则重开 | ✅ available 时静默；`openable` 时成功救回 |
+
+日志 `~/.orca-gui-watch.log`，正常情况**为空**。有记录即真实救场，每行含实际 status 值。
+
+**判断 GUI 存活只能用 `desktopWindowStatus`。** `pgrep -f '^/opt/Orca/orca-ide$'` 在
+daemon 拉起 GUI 后会失配（命令行带参数），不可作为判据。
+
+GUI 为何必须 `available`（状态对照表与原因）见下方 §Orchestration 边界结论，此处不重复。
+
 ---
 
 ## Home Laptop — cold standby
@@ -239,10 +256,12 @@ P1-C lineage lint 无需为此做例外处理。
 
 | 变更 | 理由 | 代价 | 撤销 |
 |---|---|---|---|
-| **GDM 自动登录** | Desktop Sharing 依赖已登录会话；不开则重启后 RDP 不可用 | 物理接触者无需密码即可进入已登录会话 | 恢复 `/etc/gdm3/custom.conf`（备份 `.bak.2026-08-22`）后重启 gdm |
+| **GDM 自动登录** | ① Desktop Sharing 依赖已登录会话；不开则重启后 RDP 不可用。② （2026-08-27 新增）Orca GUI 必须常驻才能派活与 release；断电重启后若停在 GDM 登录界面则无图形会话，GUI 起不来、向日葵无会话可连，远程降级为只读 | 物理接触者无需密码即可进入已登录会话。**放宽的只是开机首次进入会话这一步**——账户密码、`sudo` 密码、锁屏均保留；机器在家中物理环境，远程访问仍受 tailnet 与 ufw 管控 | 注释 `/etc/gdm3/custom.conf` 中的 `AutomaticLogin*` 两行（备份 `.bak.2026-08-22`）后 `sudo systemctl restart gdm3` |
 | **login keyring 改为空密码** | 自动登录无密码可用于解锁 keyring，导致 RDP 凭据读不出、连接被拒（`Credentials are not set`） | keyring 明文保护降低 | Seahorse 中为 Login keyring 重设密码 |
 | **Tailscale HTTPS 证书** | `tailscale serve` 需要；使 iOS Safari 无警告访问 | tailnet 机器名进入**公开 CT 日志** | 管理后台关闭 HTTPS Certificates |
 | **`tailscale set --operator=$USER`** | 免 sudo 执行 `tailscale serve`/`cert` | 该用户可管理 Tailscale | `sudo tailscale set --operator=` |
+
+**自动登录实测**：2026-08-27 `restart gdm3` 后 `loginctl list-sessions` 出现 `seat0 tty2 active` 会话 — VERIFIED。
 
 ---
 

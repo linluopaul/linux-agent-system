@@ -1,0 +1,6 @@
+[Unit]
+Description=Ensure Orca IDE GUI window is available
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/orca-gui-watch.sh
