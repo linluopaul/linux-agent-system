@@ -4,6 +4,13 @@
 - Date: 2026-08-18
 - Scope: Agent role authority, provider preferences, execution packets and review context
 
+> Partial-supersession note (2026-09-09): ADR-008 partially supersedes this ADR. The
+> central separation recorded here survives in V4 — cognitive outcome ownership is not
+> engineering execution — and V4 expresses it as Root is not Lead. What ADR-008 supersedes
+> is the V3-specific implementation mechanics: Execution Packet mechanics, Orca Run
+> topology, and the obsolete provider/runtime/control-plane mechanics. The body below is
+> retained unchanged as the historical record.
+
 ## Context
 
 ADR-001 made Orca the primary execution and collaboration plane and recorded Codex as the

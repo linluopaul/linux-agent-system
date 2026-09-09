@@ -4,6 +4,16 @@
 - Date: 2026-08-18
 - Scope: Writable Execution Lead-to-Worker Git base, result and integration semantics
 
+> Partial-supersession note (2026-09-09): ADR-008 partially supersedes this ADR.
+> Superseded: `Worker` as a current core role, and the Worker/Orca-specific mandatory
+> topology and lifecycle. V4 has four cognitive roles — Root, Lead, Delegate, Reviewer —
+> and bounded execution is performed by a Delegate. Retained and carried into V4: an
+> explicit immutable base with recorded provenance; writable delegated work must not
+> silently mutate the protected parent/main checkout; the Lead owns verified integration;
+> orchestration lineage is not Git ancestry; and dirty work must be resolved before safe
+> cleanup. The body below is retained unchanged, including its `Worker` vocabulary, as the
+> historical record.
+
 ## Context
 
 A disposable writable Root → Execution Lead → Worker smoke test proved that Orca worktree
