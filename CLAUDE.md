@@ -2,7 +2,7 @@
 
 @AGENTS.md
 
-## Claude-specific guidance
+Harness and provider capability facts: `.agent/capabilities.md`.
 
-See `.agent/providers/claude.md` (pool profile) and `.agent/harnesses/claude-code.md`
-(harness class).
+Load a single procedure from `.agent/procedures/` only when the task actually needs it:
+`delegate.md` · `writable-work.md` · `checkpoint.md` · `review.md`.
