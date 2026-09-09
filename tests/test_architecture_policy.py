@@ -416,12 +416,6 @@ ROLE_CLAIM_TOKENS = {
 # was harness-first ('Pi is assigned to Root ... work'), the reverse of the four role-first
 # shapes it models. This map pins which harness a harness file is about so the F4 guard can
 # resolve a harness-first claim to a (harness, role) pair deterministically.
-HARNESS_FILE_TO_KEY = {
-    ".agent/harnesses/pi.md": "pi",
-    ".agent/harnesses/claude-code.md": "claude_code",
-    ".agent/harnesses/codex-cli.md": "codex_cli",
-}
-
 
 def _harness_spelling_map(harness_keys: list[str]) -> dict[str, str]:
     """Map every textual spelling of a policy harness key back to that key.
@@ -765,95 +759,19 @@ class ArchitecturePolicyTests(unittest.TestCase):
             )
         return yaml.safe_load(read(relative_path))
 
-    def test_policy_yaml_parses_and_provider_preferences_hold(self) -> None:
-        if yaml is None:
-            self.skipTest(
-                "PyYAML is not installed and this repository declares no Python dependencies"
-            )
-        policy_paths = sorted((ROOT / ".agent/policies").glob("*.yaml"))
-        parsed = {}
-        for path in policy_paths:
-            try:
-                parsed[path.name] = yaml.safe_load(path.read_text(encoding="utf-8"))
-            except yaml.YAMLError as error:
-                self.fail(f"{path.relative_to(ROOT)} is not valid YAML: {error}")
 
-        routing = parsed["routing.yaml"]
-        harnesses = routing["harnesses"]
-        for harness in ("pi", "claude_code", "codex_cli"):
-            self.assertIn(harness, harnesses)
-        # pi is a harness, not a model pool
-        self.assertNotIn("pi", routing["model_pools"])
-        for pool in (
-            "claude",
-            "codex",
-            "deepseek",
-            "volcengine_ark_coding_plan",
-            "min_max",
-            "kimi",
-            "gemini",
-        ):
-            self.assertIn(pool, routing["model_pools"])
-
-        defaults = routing["defaults"]
-        self.assertEqual("claude_code", defaults["preferred_harness"]["root"])
-        self.assertEqual("pi", defaults["preferred_harness"]["execution_lead"])
-        self.assertEqual("pi", defaults["execution_lead"]["standard_harness"])
+    def test_policy_yaml_parses_and_declares_exactly_four_cognitive_roles(self) -> None:
+        """One canonical policy file; exactly four cognitive roles; no retired V3 role."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        self.assertEqual(["root", "lead", "delegate", "reviewer"], policy["cognitive_roles"])
         self.assertEqual(
-            "codex_cli", defaults["execution_lead"]["premium_escalation_harness"]
+            sorted(["root", "lead", "delegate", "reviewer"]),
+            sorted(policy["routing"]["role_preference"]),
         )
-
-        # The Execution Lead defaults to Pi (Standard/Fast); Codex is the premium
-        # escalation and appears only for high-risk/difficult routing, never as a
-        # per-role provider binding.
-        self.assertEqual("pi", routing["risk"]["low"]["preferred_harness"]["execution_lead"])
-        self.assertEqual(
-            "pi", routing["risk"]["medium"]["preferred_harness"]["execution_lead"]
-        )
-        self.assertEqual(
-            "codex_cli", routing["risk"]["high"]["preferred_harness"]["execution_lead"]
-        )
-        self.assertEqual(
-            "cross_provider_or_human_visible_residual_risk_waiver",
-            routing["risk"]["high"]["reviewer_provider_diversity"],
-        )
-        self.assertEqual("required", routing["risk"]["high"]["independent_review"])
-        self.assertNotIn("preferred_worker", routing)
-        self.assertNotIn("preferred_root", routing)
-        self.assertNotIn("preferred_execution_lead", routing)
-
-        principles = routing["principles"]
-        for principle in (
-            "route_by_role_then_harness_then_model_pool",
-            "root_selects_the_execution_lead_harness_class",
-            "pi_is_the_default_execution_lead_harness_for_well_scoped_low_medium_work",
-            "codex_is_a_premium_execution_lead_escalation_not_a_mandatory_binding",
-            "root_reentry_is_limited_to_the_closed_escalation_list",
-            "do_not_permanently_bind_provider_to_role",
-            "claude_is_default_root_preference",
-        ):
-            self.assertIn(principle, principles)
-        self.assertNotIn(
-            "normal_codex_execution_usage_substantially_exceeds_claude_root_usage",
-            principles,
-        )
-        self.assertNotIn(
-            "codex_is_default_root_preference",
-            principles,
-        )
-        self.assertNotIn(
-            "codex_is_default_execution_lead_preference",
-            principles,
-        )
-        self.assertNotIn(
-            "deepseek_is_preferred_for_well_scoped_worker_tasks",
-            principles,
-        )
-        self.assertIn("levels", parsed["risk.yaml"])
-        self.assertIn("execution_lead_failure", parsed["retry.yaml"])
-        self.assertIn("catalog", parsed["capabilities.yaml"])
-        self.assertIn("principles", parsed["efficiency.yaml"])
-
+        flat = read(".agent/policy.yaml").lower()
+        for retired in ("worker", "platform_steward", "supervisor", "meta_root", "memory_agent"):
+            self.assertNotIn(retired, flat, f"retired cognitive role key in policy: {retired}")
+        self.assertFalse(policy["routing"]["preferences_are_permanent_bindings"])
 
     def test_v4_role_model_and_escalation_types(self) -> None:
         """Structural: exactly four cognitive roles, recursive Child Root, and the three
@@ -885,10 +803,10 @@ class ArchitecturePolicyTests(unittest.TestCase):
             )
 
 
+
     def test_review_independence_and_verdict_preservation(self) -> None:
         """Fresh context-isolated Reviewer, minimal material, independently preserved
-        verdict, Lead not the sole transport. Canonical home: .agent/procedures/review.md.
-        The HIGH-risk provider-diversity safeguard remains asserted against policy."""
+        verdict, Lead not the sole transport. Canonical home: .agent/procedures/review.md."""
         procedure = normalize(read(".agent/procedures/review.md")).lower()
         self.assertIn("fresh", procedure)
         self.assertIn("context-isolated", procedure)
@@ -901,9 +819,9 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("fresh, context-isolated reviewer", architecture)
         self.assertIn("lead owns the review/fix loop", architecture)
 
-        routing = read(".agent/policies/routing.yaml")
-        self.assertIn("reviewer_pool_must_differ_from_implementer_pool", routing)
-        self.assertIn("reviewer_provider_diversity", routing)
+        independence = self.load_yaml(".agent/policy.yaml")["review"]["independence"]
+        self.assertTrue(independence["reviewer_must_be_fresh_and_context_isolated"])
+        self.assertIn("cross_provider", independence["provider_diversity_when_required"])
 
     def test_no_current_document_claims_codex_is_the_default_root(self) -> None:
         historical_adr = ROOT / "docs/decisions/ADR-001-orca-first-execution-plane.md"
@@ -947,20 +865,31 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("retained as a historical record", historical)
         self.assertIn("ADR-002 supersedes only the provider-role preference", historical)
 
-    def test_high_risk_review_guardrail_is_preserved(self) -> None:
-        risk = read(".agent/policies/risk.yaml")
-        routing = read(".agent/policies/routing.yaml")
 
-        self.assertIn("independent_review: required", risk)
-        self.assertIn("controller_security_and_safety_policy", risk)
-        self.assertIn("independent_review: required", routing)
-        self.assertIn(
-            "reviewer_provider_diversity: "
-            "cross_provider_or_human_visible_residual_risk_waiver",
-            routing,
-        )
-        self.assertNotIn("reviewer_independence", routing)
 
+    def test_review_requirement_has_exactly_one_canonical_source(self) -> None:
+        """R2: policy.review is the sole source deciding WHETHER review is required.
+        Routing carries no legacy independent_review mirror."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        review = policy["review"]
+        self.assertTrue(review["canonical_source"])
+        self.assertIs(False, review["levels"]["low"]["review_required"])
+        self.assertEqual("conditional", review["levels"]["medium"]["review_required"])
+        self.assertIs(True, review["levels"]["high"]["review_required"])
+
+        def keys(node):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    yield k
+                    yield from keys(v)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from keys(item)
+
+        routing_keys = set(keys(policy["routing"]))
+        self.assertNotIn("independent_review", routing_keys, "legacy mirror in routing")
+        self.assertNotIn("review_required", routing_keys, "routing must not decide review")
+        self.assertEqual("whether_review_is_required", policy["routing"]["never_decides"])
 
     def test_escalation_format_is_type_question_evidence(self) -> None:
         """One escalation asks one concrete question, in a fixed three-part shape."""
@@ -969,36 +898,6 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn(part, architecture, part)
         self.assertIn("one concrete question", architecture.lower())
         self.assertIn("TYPE / QUESTION / EVIDENCE", normalize(read("AGENTS.md")))
-
-    def test_pi_is_modeled_as_harness_not_model_or_provider(self) -> None:
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        self.assertIn("pi", routing["harnesses"])
-        self.assertNotIn("pi", routing["model_pools"])
-        pi_harness = read(".agent/harnesses/pi.md")
-        lower = pi_harness.lower()
-        self.assertIn("harness", lower)
-        self.assertIn("runtime", lower)
-        self.assertIn("model/provider pool", lower)
-        self.assertNotIn("pi is a fixed model", lower)
-        self.assertIn("worker-start", pi_harness)
-
-    def test_worker_role_is_not_bound_to_deepseek(self) -> None:
-        worker = read(".agent/roles/worker.md")
-        self.assertIn("bound to any one model/provider pool", worker)
-        self.assertIn("not", worker.split("bound to any one")[0])
-        deepseek = read(".agent/providers/deepseek.md")
-        self.assertIn("Worker *role* is not bound to DeepSeek", deepseek)
-        self.assertIn("not a role and not a permanent binding", deepseek)
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        self.assertIn("deepseek", routing["model_pools"])
-        self.assertNotIn("preferred_worker", routing)
-        self.assertNotIn(
-            "deepseek_is_preferred_for_well_scoped_worker_tasks",
-            routing["principles"],
-        )
-        architecture = read("docs/ARCHITECTURE.md")
-        self.assertNotIn("preferred provider", architecture)
-        self.assertNotIn("DeepSeek Execution Worker", architecture)
 
     def test_no_live_provider_as_role_binding_anywhere(self) -> None:
         """Bilingual no-provider-as-role invariant across ALL live architecture text.
@@ -1104,14 +1003,10 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 f"false positive on legitimate harness vocabulary: {phrase!r}",
             )
 
-    def test_guard_escape_hatch_and_config_distinction(self) -> None:
-        """S3: historical narration (escape hatch) and policy-config both stay unflagged.
 
-        The same historical clause is FLAGGED as a live prose binding but PASSES once it
-        is wrapped in the HISTORICAL-BINDING escape hatch; and a machine-readable config
-        preference (`reviewer: claude`) is a key whose value is a pool name, so it must
-        not be swept up as a prose role binding. routing.yaml carries such a key today.
-        """
+    def test_guard_escape_hatch_and_config_distinction(self) -> None:
+        """Historical narration (escape hatch) and machine-readable policy config both stay
+        unflagged, while the same clause in live prose is flagged."""
         historical = 'the single "Codex Execution Lead" binding'
         self.assertTrue(provider_bindings_in_text(historical), "quote should flag as live prose")
         marked = (
@@ -1122,13 +1017,10 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertEqual(
             [], provider_bindings_in_text(marked), "escape hatch must un-flag historical prose"
         )
-
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        self.assertIn("claude", routing["risk"]["high"]["preferred_pool"]["reviewer"])
         self.assertEqual(
             [],
-            provider_bindings_in_document(ROOT / ".agent" / "policies" / "routing.yaml"),
-            "policy-config preference keys must not be flagged as prose role bindings",
+            provider_bindings_in_document(ROOT / ".agent" / "policy.yaml"),
+            "policy config keys must not be flagged as prose role bindings",
         )
 
     def test_historical_binding_escape_hatch_only_in_adr_004(self) -> None:
@@ -1161,337 +1053,123 @@ class ArchitecturePolicyTests(unittest.TestCase):
             "HISTORICAL-BINDING escape hatch used outside docs/decisions/ADR-004-*.md",
         )
 
-    def test_root_selects_execution_lead_harness(self) -> None:
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        self.assertIn(
-            "root_selects_the_execution_lead_harness_class", routing["principles"]
-        )
 
-    def test_capability_profile_catalog_exists_and_is_referenced(self) -> None:
-        caps = self.load_yaml(".agent/policies/capabilities.yaml")
-        catalog = caps["catalog"]
-        for capability in (
-            "repo",
-            "git",
-            "python-test",
-            "orca-cli",
-            "orchestration",
-            "worker-integration",
-            "github",
-            "system-inspection",
-            "ssh",
-            "tailscale",
-            "quantitative-analysis",
-        ):
-            self.assertIn(capability, catalog)
+    def test_capability_profile_integrity(self) -> None:
+        """V4 capability profiles exist, are least-capability gated, and carry no
+        Worker or Platform Steward profile."""
+        caps = self.load_yaml(".agent/policy.yaml")["capabilities"]
         self.assertIn("least_capability", caps)
         self.assertIn("progressive_disclosure", caps)
-        self.assertIn("profiles", caps)
+        profiles = caps["profiles"]
+        for required in ("root-standard", "lead-standard", "delegate-readonly",
+                         "delegate-writable", "reviewer-independent"):
+            self.assertIn(required, profiles, required)
+        for name in profiles:
+            self.assertFalse(name.startswith("worker-"), name)
+            self.assertFalse(name.startswith("platform-steward"), name)
+        catalog = caps["catalog"]
+        for granted in (c for p in profiles.values() for c in p["includes"]):
+            self.assertIn(granted, catalog, granted)
+        self.assertTrue(catalog["delegate-integration"]["sensitive"])
 
-    def test_efficiency_policy_principles_exist(self) -> None:
-        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
-        principles = efficiency["principles"]
-        self.assertGreaterEqual(len(principles), 10)
-        for principle in (
+
+    def test_efficiency_principles_exist(self) -> None:
+        policy = self.load_yaml(".agent/policy.yaml")
+        principles = policy["efficiency"]["principles"]
+        for required in (
             "use_the_cheapest_capable_resource",
             "prefer_deterministic_tools_tests_and_evals_before_model_calls",
-            "never_narrate_routine_tool_usage",
-            "use_terse_structured_agent_to_agent_reporting",
-            "minimize_always_loaded_repository_instructions",
+            "delegate_when_result_is_needed_but_process_need_not_remain_in_parent_context",
+            "report_compressed_evidence_not_transcripts_or_reasoning_dumps",
+            "reasoning_effort_is_not_a_token_savings_lever",
         ):
-            self.assertIn(principle, principles)
-
-    def test_terse_reporting_principle_and_clarity_exceptions(self) -> None:
-        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
-        self.assertEqual(
-            "STATUS/CHANGED/VERIFY/COMMIT/BLOCKERS/UNCERTAINTY/NEXT",
-            efficiency["report_block"]["header"],
-        )
-        overrides = efficiency["clarity_overrides"]
-        for item in (
-            "architecture_decisions",
-            "acceptance_criteria",
-            "security_warnings",
-            "destructive_operations",
-            "human_approval_requests",
-            "unresolved_ambiguity",
-            "high_risk_findings",
-        ):
-            self.assertIn(item, overrides)
+            self.assertIn(required, principles, required)
 
     def test_caveman_is_not_a_dependency(self) -> None:
-        # Caveman must not be a declared dependency in any manifest / requirements /
-        # lockfile / install instruction that exists in this repository.
-        manifest_names = (
-            "requirements.txt",
-            "pyproject.toml",
-            "setup.py",
-            "setup.cfg",
-            "Pipfile",
-            "Pipfile.lock",
-            "package.json",
-            "package-lock.json",
-        )
-        for name in manifest_names:
-            path = ROOT / name
-            if path.exists():
-                self.assertNotIn(
-                    "caveman", path.read_text(encoding="utf-8").lower(), name
-                )
+        """No external tool is a hard dependency of the policy surface."""
+        policy = read(".agent/policy.yaml").lower()
+        for forbidden in ("caveman", "required_tool:", "hard_dependency"):
+            self.assertNotIn(forbidden, policy, forbidden)
 
-        # Not a routing requirement.
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        self.assertNotIn("caveman", json.dumps(routing).lower())
-
-        # Not an execution-policy requirement nor a role/harness profile requirement.
-        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
-        self.assertNotIn("caveman", json.dumps(efficiency).lower())
-        role_harness_dirs = (ROOT / ".agent" / "roles", ROOT / ".agent" / "harnesses")
-        tracked = tracked_repository_paths()
-        if tracked is None:
-            role_harness_paths = [
-                p for d in role_harness_dirs if d.exists() for p in d.rglob("*") if p.is_file()
-            ]
-        else:
-            role_harness_paths = [
-                p for p in tracked if any(_is_under(p, d) for d in role_harness_dirs)
-            ]
-        for path in role_harness_paths:
-            self.assertNotIn(
-                "caveman",
-                path.read_text(encoding="utf-8", errors="replace").lower(),
-                str(path.relative_to(ROOT)),
-            )
-
-        # Not a required or installed Skill or Extension. (No skill/extension shorthand
-        # is present in the repo's .agent/skills; nothing installs Caveman.)
-        skills_dir = ROOT / ".agent" / "skills"
-        if skills_dir.exists():
-            if tracked is None:
-                skill_paths = [p for p in skills_dir.rglob("*") if p.is_file()]
-            else:
-                skill_paths = [p for p in tracked if _is_under(p, skills_dir)]
-            for path in skill_paths:
-                self.assertNotIn(
-                    "caveman",
-                    path.read_text(encoding="utf-8").lower(),
-                    str(path.relative_to(ROOT)),
-                )
-
-        # Terse reporting is a native principle that stands alone without Caveman.
-        self.assertIn(
-            "use_terse_structured_agent_to_agent_reporting",
-            efficiency["principles"],
-        )
 
     def test_reasoning_effort_is_not_a_token_savings_lever(self) -> None:
-        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
+        """Reasoning effort is a correctness parameter: it must not appear as a cost lever."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        efficiency = policy["efficiency"]
+        self.assertIn("reasoning_effort_is_not_a_token_savings_lever", efficiency["principles"])
+        for lever in efficiency["cost_levers"]:
+            self.assertNotIn("reasoning", lever, lever)
+        self.assertTrue(efficiency["premium_adaptivity"]["low_cost_reasoning_stays_high"])
 
-        # The `typical` (standard-effort) profile was removed to close the residual
-        # token-saving hole. EVERY LOW-COST profile keeps HIGH reasoning effort (never
-        # lowered to save tokens); reasoning effort is a correctness parameter, not a cost
-        # lever. Premium profiles are ADAPTIVE (see the dedicated premium-policy test).
-        self.assertNotIn("typical", efficiency["profiles"])
-        low_cost_profiles = [
-            (name, profile.get("reasoning", ""))
-            for name, profile in efficiency["profiles"].items()
-            if profile.get("pool_class") == "low_cost"
-            or not profile.get("pool_class")
-        ]
-        self.assertTrue(low_cost_profiles, "no low-cost profile to enforce HIGH reasoning")
-        for name, reasoning in low_cost_profiles:
-            self.assertEqual("high", reasoning, name)
+    def test_premium_capability_and_reasoning_effort_are_adaptive(self) -> None:
+        adaptivity = self.load_yaml(".agent/policy.yaml")["efficiency"]["premium_adaptivity"]
+        self.assertTrue(adaptivity["allowed"])
+        self.assertEqual("root", adaptivity["envelope_owner"])
+        self.assertTrue(adaptivity["hardcoded_high_forbidden"])
+        self.assertTrue(adaptivity["low_cost_reasoning_stays_high"])
 
-        # efficiency.yaml names reasoning/thinking effort as excluded from cost levers.
-        self.assertIn(
-            "reasoning_effort_is_not_a_token_savings_lever", efficiency["principles"]
-        )
-        text = read(".agent/policies/efficiency.yaml").lower()
-        self.assertIn("not a token-savings lever", text)
-        self.assertIn("not a cost parameter", text)
+    def test_efficiency_does_not_weaken_review_guardrails(self) -> None:
+        """Cost optimisation may never reach the review requirement."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        levers = yaml.safe_dump(policy["efficiency"])
+        for forbidden in ("review_required", "independent_review", "skip_review"):
+            self.assertNotIn(forbidden, levers, forbidden)
+        self.assertIs(True, policy["review"]["levels"]["high"]["review_required"])
 
-        # The approved cost levers are enumerated.
-        cost_levers = efficiency["cost_levers"]
-        for lever in (
-            "cheaper_model_routing",
-            "targeted_context",
-            "progressive_disclosure_skills",
-            "task_bounded_sessions",
-            "terse_reporting",
-            "deterministic_verification",
-            "premium_model_avoidance",
-        ):
-            self.assertIn(lever, cost_levers)
 
-    def test_premium_model_and_reasoning_effort_are_adaptive(self) -> None:
-        """Premium model choice and reasoning effort are ADAPTIVE, never hard-coded HIGH
-        everywhere. The policy is documented independently of whether any harness currently
-        exposes the switching primitive."""
-        efficiency = self.load_yaml(".agent/policies/efficiency.yaml")
-        self.assertIn(
-            "premium_model_and_reasoning_effort_are_adaptive", efficiency["principles"]
-        )
-        adaptivity = efficiency.get("premium_adaptivity", {})
-        self.assertTrue(adaptivity.get("allowed"))
-        self.assertEqual(
-            "root_or_supervisor", adaptivity.get("envelope_owner")
-        )
-        self.assertTrue(adaptivity.get("hardcoded_high_forbidden"))
-        decision_points = adaptivity.get("decisions_occur_at", [])
-        for point in (
-            "task_start",
-            "major_phase_boundary",
-            "evidence_based_escalation",
-        ):
-            self.assertIn(point, decision_points)
+    def test_role_harness_binding_guard_with_positive_control(self) -> None:
+        """The role->harness parser is proven against synthetic fixtures, then swept over
+        the live tree. A guard whose only evidence is 'the repo happens to be clean' cannot
+        show it still detects anything, so the positive control runs first."""
+        spelling_to_key = _harness_spelling_map(["pi", "claude_code", "codex_cli"])
 
-        # No premium profile may hard-code HIGH; the premium profile is adaptive.
-        premium = [
-            p
-            for p in efficiency["profiles"].values()
-            if p.get("pool_class") == "premium"
-        ]
-        self.assertTrue(premium, "no premium (adaptive) profile is declared")
-        for profile in premium:
-            self.assertNotEqual("high", profile.get("reasoning"), "premium must be adaptive")
-            self.assertEqual("adaptive", profile.get("reasoning"))
-
-    def test_efficiency_policy_does_not_weaken_high_risk_guardrails(self) -> None:
-        efficiency = read(".agent/policies/efficiency.yaml")
-        self.assertIn("NOT weaken the HIGH-risk", efficiency)
-        self.assertIn("risk.yaml", efficiency)
-        self.assertIn("human-gate", efficiency)
-        risk = read(".agent/policies/risk.yaml")
-        self.assertIn("independent_review: required", risk)
-        self.assertIn("controller_security_and_safety_policy", risk)
-        routing = read(".agent/policies/routing.yaml")
-        self.assertIn(
-            "reviewer_provider_diversity: "
-            "cross_provider_or_human_visible_residual_risk_waiver",
-            routing,
-        )
-
-    def test_live_role_harness_claims_agree_with_policy(self) -> None:
-        """v2.1: every live role->harness statement agrees with routing.yaml.
-
-        routing.yaml is the single source of truth: the blessed role->harness mapping
-        and the recognised harness spellings are both read from the YAML, never
-        hardcoded. The test sweeps all four recognisable claim shapes (md table cell,
-        fenced diagram block, bilingual prose sentence, and any other structured list
-        item) across every live architecture document and asserts that each claim
-        names a harness policy actually allows for that role. A stale "pi harness for
-        Root", "pi harness for Root in the §7 table", or a stale pi-Root prose claim
-        each fails below. The recognised-harness-forms constraint the helpers enforce
-        (a claim is checked only when it appears in one of these shapes and names the
-        harness in a recognised spelling) is documented next to the helpers and is
-        intentionally strict to avoid false positives.
-        """
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        defaults = routing["defaults"]
-        preferred = defaults["preferred_harness"]
-        allowed = {role: [preferred[role]] for role in preferred}
-        premium = defaults.get("execution_lead", {}).get("premium_escalation_harness")
-        if premium and premium not in allowed["execution_lead"]:
-            allowed["execution_lead"].append(premium)
-        spelling_to_key = _harness_spelling_map(list(routing["harnesses"].keys()))
-
-        failures = []
-        discovered: list[str] = []
-        total = 0
-        for path in live_architecture_documents():
-            for role_key, harness_key, shape, snippet in _role_harness_claims(
-                path, spelling_to_key
-            ):
-                total += 1
-                discovered.append(
-                    f"{path.relative_to(ROOT)} [{shape}] {role_key} -> "
-                    f"{harness_key} :: {snippet!r}  "
-                    f"(policy allows {sorted(allowed.get(role_key, []))})"
+        # POSITIVE CONTROL: each fixture is an illegal role->harness binding and the
+        # parser MUST resolve it to a (role, harness) pair.
+        illegal = {
+            "table row": "| Root | pi harness | owns the outcome |",
+            "prose": "The Reviewer is assigned to the codex-cli harness for every task.",
+            "fenced": "```text\nRoot -> claude-code harness\n```",
+        }
+        for shape, fixture in illegal.items():
+            with self.subTest(positive_control=shape):
+                detected = (
+                    _prose_claims(fixture, spelling_to_key)
+                    + _table_row_claims(fixture, spelling_to_key)
+                    + _fence_claims(fixture, spelling_to_key)
                 )
-                if harness_key not in allowed.get(role_key, []):
-                    failures.append(
-                        f"{path.relative_to(ROOT)} [{shape}] role '{role_key}' claims "
-                        f"harness '{harness_key}' but routing.yaml defaults."
-                        f"preferred_harness allows {sorted(allowed.get(role_key, []))} "
-                        f":: {snippet!r}"
-                    )
+                self.assertTrue(
+                    detected,
+                    f"parser missed an illegal role->harness binding ({shape}): {fixture!r}",
+                )
 
-        # V4: the architecture and standing surfaces must carry NO role->harness claim
-        # at all - no role is permanently bound to a harness, model or provider. The
-        # cross-check below still guards any claim that remains in other live documents.
-        for path in ("AGENTS.md", "docs/ARCHITECTURE.md"):
+        # NEGATIVE CONTROL: a plain capability description names a harness but binds no
+        # role, and must not be flagged.
+        for legal in (
+            "Claude Code is an interactive terminal harness running Claude models.",
+            "Pi is a harness whose model is selected at runtime from a configured pool.",
+        ):
+            with self.subTest(negative_control=legal):
+                self.assertEqual([], _prose_claims(legal, spelling_to_key), legal)
+
+        # LIVE SWEEP: the V4 architecture and standing surfaces bind no role to a harness.
+        for path in ("AGENTS.md", "docs/ARCHITECTURE.md", ".agent/capabilities.md"):
             self.assertEqual(
                 [],
                 _role_harness_claims(ROOT / path, spelling_to_key),
                 f"{path} must not bind a role to a harness",
             )
-        if failures:
-            self.fail(
-                "Live role->harness claim(s) contradict routing.yaml "
-                "defaults.preferred_harness:\n" + "\n".join(failures)
+
+
+    def test_capability_descriptor_cannot_assign_roles(self) -> None:
+        """The capability descriptor answers WHAT a harness/provider can do, never WHICH
+        role must use it. Role selection belongs to policy."""
+        descriptor = read(".agent/capabilities.md")
+        self.assertEqual([], provider_bindings_in_document(ROOT / ".agent" / "capabilities.md"))
+        for role_word in ("Root", "Lead", "Delegate", "Reviewer", "Worker", "Platform Steward"):
+            self.assertNotIn(
+                role_word, descriptor, f"capability descriptor names a role: {role_word}"
             )
-
-    def test_harness_files_cannot_claim_role_assignment_contradicting_policy(self) -> None:
-        """F1/F4 guard: a harness file may not use the harness-first prose forms 'assigned
-        to <Role>' or 'used for <Role> work' to claim a role assignment that routing.yaml
-        does not default/prefer that harness for.
-
-        The F1 defect is exactly the shape this guard closes: pi.md claimed Pi 'is assigned
-        to Root, Reviewer, Worker and Specialist work' even though routing.yaml sets
-        `defaults.preferred_harness.root: claude_code`. The v2.1 role-first cross-check
-        (test_live_role_harness_claims_agree_with_policy) missed it because the claim is
-        harness-first - the reverse of the four role-first shapes it models. This guard
-        closes only that named prose form and never the pointer-style 'per routing.yaml'
-        sentences.
-        """
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        defaults = routing["defaults"]
-        preferred = defaults["preferred_harness"]
-        allowed = {role: [preferred[role]] for role in preferred}
-        premium = defaults.get("execution_lead", {}).get("premium_escalation_harness")
-        if premium and premium not in allowed["execution_lead"]:
-            allowed["execution_lead"].append(premium)
-        spelling_to_key = _harness_spelling_map(list(routing["harnesses"].keys()))
-
-        # The guard MUST fail on the exact pre-fix pi.md claim (mutation (a), also covered
-        # in the scratch-checkout bar) and pass on the corrected text.
-        pre_fix = (
-            "Per that file Pi is the standard Execution Lead harness class and is "
-            "assigned to Root, Reviewer, Worker and Specialist work where a cheap "
-            "low-cost harness fits."
-        )
-        self.assertTrue(
-            _harness_assignment_claims_on_text(pre_fix, spelling_to_key, "pi"),
-            "F4 guard must catch the pre-fix 'assigned to Root' claim",
-        )
-        corrected = (
-            "Per that file Pi is the standard Execution Lead harness class and is the "
-            "default harness for Reviewer, Worker, Specialist and Platform Steward work; "
-            "the Root default harness is Claude Code (root: claude_code), not Pi."
-        )
-        self.assertEqual(
-            [],
-            _harness_assignment_claims_on_text(corrected, spelling_to_key, "pi"),
-            "false positive on corrected pi.md role-routing prose",
-        )
-
-        failures = []
-        for path in (ROOT / ".agent" / "harnesses").glob("*.md"):
-            for role_key, harness_key, snippet in _file_harness_assignment_claims(
-                path, spelling_to_key
-            ):
-                if harness_key not in allowed.get(role_key, []):
-                    failures.append(
-                        f"{path.relative_to(ROOT)} claims harness '{harness_key}' is "
-                        f"assigned/used for role '{role_key}' but routing.yaml "
-                        f"defaults.preferred_harness allows "
-                        f"{sorted(allowed.get(role_key, []))} :: {snippet!r}"
-                    )
-        if failures:
-            self.fail(
-                "Live harness-first role-assignment claim contradicts routing.yaml:\n"
-                + "\n".join(failures)
-            )
+        self.assertIn("resolved by policy", descriptor)
 
     def test_skill_preserves_existing_worktree_reuse_invariant(self) -> None:
         """v2.1.1 F2: the guarded worktree-reuse invariant must live at its canonical home
@@ -1545,144 +1223,84 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertIn("ALREADY_PRESENT", skill)
         self.assertIn("git cherry-pick --skip", skill)
 
-    def test_harness_files_do_not_declare_role_default_independently(self) -> None:
-        routing = self.load_yaml(".agent/policies/routing.yaml")
-        # routing.yaml is the normative role->harness source; Pi is a harness, not a pool.
-        self.assertIn("pi", routing["harnesses"])
-        self.assertNotIn("pi", routing["model_pools"])
-        self.assertEqual("claude_code", routing["defaults"]["preferred_harness"]["root"])
-        self.assertEqual("pi", routing["defaults"]["preferred_harness"]["execution_lead"])
-        self.assertEqual(
-            "codex_cli", routing["defaults"]["execution_lead"]["premium_escalation_harness"]
-        )
-        # Every harness file points to routing.yaml for role preference; none independently
-        # declares a role default, and the "believed default" hedge is removed.
-        for harness in ("pi", "claude-code", "codex-cli"):
-            text = read(f".agent/harnesses/{harness}.md")
-            self.assertIn("routing.yaml", text, harness)
-            self.assertIn("bound", text.lower(), harness)
-        self.assertNotIn("believed default", read(".agent/harnesses/pi.md").lower())
-        # Pi's durable identity no longer names a host-specific default pool.
-        self.assertNotIn("default pool is", read(".agent/harnesses/pi.md").lower())
 
-    def test_medium_review_budget_is_bounded(self) -> None:
-        retry = self.load_yaml(".agent/policies/retry.yaml")
-        medium = retry["review_budget"]["medium"]
-        self.assertTrue(medium["applies_when_review_is_required"])
-        for key in ("initial_review", "fix_cycles", "focused_re_reviews"):
-            self.assertIsInstance(medium[key], int, key)
-            self.assertGreaterEqual(medium[key], 1, key)
-        self.assertEqual("return_to_root_for_diagnosis", medium["on_further_blocking"])
-
-    def test_review_authority_boundary_retry_cannot_require_review(self) -> None:
-        """AMENDMENT 1: retry.yaml may govern only how many review cycles run AFTER
-        review is required; it must never itself make review required. risk.yaml remains
-        the sole authority for whether independent review is required."""
-        retry = self.load_yaml(".agent/policies/retry.yaml")
-        import json as _json
-
-        flat = _json.dumps(retry)
-        self.assertNotIn("independent_review", flat)
-        self.assertNotIn("make review required", flat)
-        risk = self.load_yaml(".agent/policies/risk.yaml")
-        self.assertEqual("conditional", risk["levels"]["medium"]["independent_review"])
-        self.assertEqual("required", risk["levels"]["high"]["independent_review"])
-
-        # v3 (ADR-007): the Lead-owned review/fix loop has a hard ceiling here. The ceiling
-        # bounds a loop that risk.yaml has already required; the assertNotIn above still
-        # proves this file cannot make review required itself.
+    def test_retry_budget_has_one_canonical_source(self) -> None:
+        """The review/fix budget lives in exactly one place and is bounded."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        retry = policy["retry"]
+        self.assertTrue(retry["canonical_source"])
         loop = retry["review_loop"]
-        self.assertEqual(3, loop["max_cycles"])
-        self.assertEqual("stop_and_return_to_root", loop["on_exhaustion"])
-        self.assertFalse(loop["lead_may_continue_editing_after_exhaustion"])
+        self.assertIsInstance(loop["max_cycles"], int)
+        self.assertGreater(loop["max_cycles"], 0)
+        self.assertIs(False, loop["may_continue_editing_after_exhaustion"])
+        # The number itself must not be duplicated into the always-loaded surface.
+        for path in ("AGENTS.md", "docs/ARCHITECTURE.md"):
+            self.assertNotIn(f"max_cycles", read(path), path)
 
-    def test_review_triggers_resolve_conditional_without_weakening_high(self) -> None:
-        """E-1: risk.yaml carries a deterministic review-trigger procedure that resolves
-        `levels.medium.independent_review: conditional`, and it may only ADD review.
+    def test_review_authority_boundary_and_safeguards(self) -> None:
+        """Retry cannot require review; routing cannot override it; safeguards may be
+        strengthened but never silently weakened."""
+        policy = self.load_yaml(".agent/policy.yaml")
+        self.assertIs(False, policy["retry"]["may_require_review"])
+        guards = policy["review"]["safeguards"]
+        self.assertIs(False, guards["may_be_silently_weakened"])
+        self.assertIs(False, guards["routing_may_override_review_required"])
+        self.assertIs(False, guards["retry_may_require_review"])
+        self.assertEqual(["human", "root"], guards["may_be_strengthened_by"])
 
-        The defect class this closes is drift: an unresolved `conditional` is re-argued on
-        every task and the re-argument drifts loose. The second defect class is a subtler
-        one - a trigger list read as EXHAUSTIVE would silently exempt HIGH work that
-        matches none of the four categories. Both are asserted below.
-        """
-        risk = self.load_yaml(".agent/policies/risk.yaml")
-        triggers = risk["review_triggers"]
 
-        # 1. All four categories exist and each one REQUIRES review.
+    def test_review_triggers_resolve_conditional_and_may_only_add(self) -> None:
+        """Triggers resolve `medium: conditional` deterministically and can only ADD
+        review. A trigger list read as exhaustive must never exempt HIGH work."""
+        review = self.load_yaml(".agent/policy.yaml")["review"]
+        triggers = review["triggers"]
+
+        self.assertEqual("review.levels.medium.review_required", triggers["resolves"])
+        self.assertEqual("level_requirement_first_then_triggers", triggers["precedence"])
+        self.assertTrue(triggers["may_only_add"])
+        self.assertTrue(triggers["never_reduces_level_requirement"])
+
         categories = triggers["categories"]
         self.assertEqual(
-            [
-                "money_movement",
-                "data_mutation",
-                "permissions_and_credentials",
-                "destructive_operations",
-            ],
+            ["money_movement", "data_mutation", "permissions_and_credentials",
+             "destructive_operations"],
             list(categories),
         )
         for name, category in categories.items():
             self.assertTrue(category["requires_independent_review"], name)
             self.assertTrue(category["matches"], name)
 
-        # 2. Direction is add-only, and the procedure is bound to the state it resolves.
-        self.assertTrue(triggers["may_only_add"])
-        self.assertTrue(triggers["never_reduces_level_requirement"])
-        self.assertEqual("levels.medium.independent_review", triggers["resolves"])
-        self.assertEqual(
-            "level_requirement_first_then_triggers", triggers["precedence"]
-        )
+        # HIGH keeps its own requirement regardless of any trigger match.
+        self.assertIs(True, review["levels"]["high"]["review_required"])
+        for example in ("backtesting", "look_ahead_sensitive_logic", "adjustment_factor_logic"):
+            self.assertIn(example, review["levels"]["high"]["examples"], example)
 
-        # 3. HIGH keeps its own requirement, independent of any trigger match.
-        self.assertEqual("required", risk["levels"]["high"]["independent_review"])
-        self.assertEqual("conditional", risk["levels"]["medium"]["independent_review"])
-
-        # 4. The concrete anti-downgrade cases: HIGH examples that need not match any
-        #    category above must remain HIGH, so the fallback can never reach them.
-        high_examples = risk["levels"]["high"]["examples"]
-        for example in (
-            "backtesting",
-            "look_ahead_sensitive_logic",
-            "adjustment_factor_logic",
-        ):
-            self.assertIn(example, high_examples, example)
-
-        # 5. The fallback is gated on BOTH conditions and never overrides a level.
         otherwise = triggers["otherwise"]
-        self.assertEqual(
-            "no_level_requirement_and_no_category_match", otherwise["condition"]
-        )
-        self.assertEqual("not_required_by_trigger", otherwise["independent_review"])
-        self.assertIn("tests_must_still_run_and_pass", otherwise["then"])
-        self.assertIn("already requires review", otherwise["note"])
+        self.assertEqual("no_level_requirement_and_no_category_match", otherwise["condition"])
+        self.assertEqual("not_required_by_trigger", otherwise["review_required"])
 
-        # 6. destructive_operations is general, not migration-only.
+        # destructive_operations is general, not migration-only.
         destructive = categories["destructive_operations"]["matches"]
         self.assertIn("destructive_migrations", destructive)
         self.assertGreater(
-            len([m for m in destructive if m != "destructive_migrations"]),
-            1,
+            len([m for m in destructive if m != "destructive_migrations"]), 1,
             "destructive_operations must cover general destruction, not only migrations",
         )
 
-        # 7. Human-gate overlaps are pointers, never a competing second rule.
+        # Human-gate overlaps are pointers, never a competing second rule.
         for name in ("permissions_and_credentials", "destructive_operations"):
             reference = categories[name]["human_gate_reference"]
-            self.assertIn("AGENTS.md", reference, name)
             self.assertIn("does not restate or relax", reference, name)
 
-
     def test_no_mandatory_handoff_memory_scratch_subsystem(self) -> None:
-        """The diet must not introduce a second state system: no mandatory HANDOFF,
-        memory hierarchy, SCRATCH, or automatic-Learnings protocol in the governed docs."""
-        governed = [
-            "AGENTS.md",
-            ".agent/skills/orca-writable-delegation/SKILL.md",
-            ".agent/roles/root.md",
-            ".agent/roles/execution-lead.md",
-            ".agent/roles/worker.md",
-        ]
-        for relative in governed:
+        """V4 has no Memory Agent and no mandatory handoff/scratch knowledge store.
+        Continuation is the Context Checkpoint; durable knowledge is Git/GitHub."""
+        for relative in ("AGENTS.md", "docs/ARCHITECTURE.md", ".agent/policy.yaml",
+                         ".agent/procedures/checkpoint.md"):
             low = read(relative).lower()
-            for marker in ("handoff.md", "scratch.md", "# handoff", "# memory", "learnings"):
+            for marker in ("handoff.md", "scratch.md", "# handoff", "memory agent"):
+                if marker == "memory agent" and "no memory agent" in low:
+                    continue
                 self.assertNotIn(marker, low, f"{relative}: {marker}")
 
     def test_minimal_task_contract_and_return_envelope(self) -> None:
@@ -1740,6 +1358,46 @@ class ArchitecturePolicyTests(unittest.TestCase):
         architecture = normalize(read("docs/ARCHITECTURE.md")).lower()
         self.assertIn("post-condition verification", architecture)
         self.assertIn("resources_clean: false", architecture)
+
+    def test_review_routing_cannot_weaken_the_review_requirement(self) -> None:
+        """R2 clause 3: when review is required, routing must resolve an eligible
+        independent reviewer, and may never downgrade the requirement."""
+        routing = self.load_yaml(".agent/policy.yaml")["routing"]
+        route = routing["review_route"]
+        self.assertTrue(route["when_review_required_must_resolve_eligible_reviewer"])
+        self.assertIs(False, route["may_downgrade_to_none_or_optional"])
+        self.assertEqual("escalate_authority_blocked", route["on_no_eligible_reviewer"])
+        eligibility = yaml.safe_dump(route["eligibility"])
+        self.assertIn("fresh_context_isolated_session", eligibility)
+        self.assertIn("strong_independent", eligibility)
+
+    def test_human_gates_are_policy_owned_and_agent_immutable(self) -> None:
+        """The protected gate list has a canonical home and no agent may relax it."""
+        gates = self.load_yaml(".agent/policy.yaml")["human_gates"]
+        self.assertIs(False, gates["may_be_relaxed_by_agent"])
+        for protected in (
+            "production_trading_permissions",
+            "destructive_data_access_restrictions",
+            "secret_and_credential_protections",
+            "high_risk_independent_review_requirement",
+            "order_and_capital_safety_guardrails",
+            "maximum_budget_and_concurrency_limits",
+            "production_deployment_gates",
+            "minimum_backup_retention",
+        ):
+            self.assertIn(protected, gates["protected"], protected)
+
+    def test_retired_agent_surfaces_are_gone(self) -> None:
+        """The V3 role, harness, provider and multi-file policy surfaces no longer exist."""
+        for directory in (".agent/roles", ".agent/harnesses", ".agent/providers",
+                          ".agent/policies"):
+            self.assertFalse(
+                (ROOT / directory).exists(), f"retired directory still present: {directory}"
+            )
+        self.assertTrue((ROOT / ".agent" / "policy.yaml").exists())
+        self.assertTrue((ROOT / ".agent" / "capabilities.md").exists())
+
+
 
 if __name__ == "__main__":
     unittest.main()

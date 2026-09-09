@@ -1,0 +1,244 @@
+# V4 policy — the single machine-readable source for execution metadata derived from the
+# minimal Task Contract (GOAL / ACCEPTANCE / CONSTRAINTS / OVERRIDES).
+#
+# Ownership boundary:
+#   review      WHETHER independent review is required        (sole canonical source)
+#   routing     HOW required work and required review execute (never decides whether)
+#   capability  what an assignment may touch
+#   retry       how many review/fix cycles are budgeted
+#   efficiency  how cost and reasoning effort are selected
+#   human_gates what an agent may never relax on its own
+#
+# This file does not define role responsibilities, the checkpoint schema, the review
+# procedure, writable-work lifecycle or runtime commands. Those have canonical homes in
+# docs/ARCHITECTURE.md, docs/decisions/ and .agent/procedures/.
+
+version: 4
+
+cognitive_roles: [root, lead, delegate, reviewer]
+
+# ---------------------------------------------------------------- review requirement ---
+# SOLE canonical source for whether independent review is required. No other section,
+# file, document or test may carry a second copy of this decision.
+review:
+  canonical_source: true
+
+  levels:
+    low:
+      description: clear, localized work with low consequence and straightforward verification
+      review_required: false
+      examples: [documentation, typo_fixes, simple_logging_changes, small_scoped_fixes, simple_tests]
+    medium:
+      description: normal engineering work with moderate scope, ambiguity or regression potential
+      review_required: conditional
+      examples: [ordinary_new_features, cross_module_bugs, moderate_refactors, api_integrations]
+    high:
+      description: >
+        work where correctness, data integrity, security, financial behaviour or
+        irreversible effects require stronger verification
+      review_required: true
+      human_gate_may_be_required: true
+      examples:
+        - financial_calculations
+        - market_data_transformations
+        - adjustment_factor_logic
+        - backtesting
+        - look_ahead_sensitive_logic
+        - trading_signals
+        - pnl_calculation
+        - position_and_risk_calculation
+        - order_execution
+        - authentication_and_authorization
+        - destructive_migrations
+        - controller_security_and_safety_policy
+
+  # Triggers resolve `medium: conditional`. They may only ADD review, never remove it.
+  triggers:
+    resolves: review.levels.medium.review_required
+    precedence: level_requirement_first_then_triggers
+    may_only_add: true
+    never_reduces_level_requirement: true
+    categories:
+      money_movement:
+        requires_independent_review: true
+        matches:
+          - order_execution
+          - pnl_calculation
+          - position_and_risk_calculation
+          - trading_signals
+          - capital_allocation_or_transfer
+          - fee_or_pricing_logic
+      data_mutation:
+        requires_independent_review: true
+        matches:
+          - market_data_transformations
+          - schema_or_migration_changes
+          - historical_data_rewrite
+          - dataset_ingestion_or_correction
+          - persisted_state_format_changes
+      permissions_and_credentials:
+        requires_independent_review: true
+        matches:
+          - authentication_and_authorization
+          - access_scope_or_role_grants
+          - secret_or_credential_handling
+          - controller_security_and_safety_policy
+        human_gate_reference: >
+          Secret and credential protections are a protected human gate below. This
+          category routes such work to review; it does not restate or relax that gate.
+      destructive_operations:
+        requires_independent_review: true
+        description: any irreversible removal or revocation, not only schema migrations
+        matches:
+          - destructive_migrations
+          - deleting_production_or_source_data
+          - irreversible_file_or_directory_removal
+          - force_deleting_branches_worktrees_or_refs
+          - revoking_or_rotating_credentials
+          - reducing_or_purging_backups
+        human_gate_reference: >
+          Minimum backup retention and destructive data-access restrictions are protected
+          human gates below. This category routes such work to review; it does not
+          restate or relax those gates.
+    otherwise:
+      condition: no_level_requirement_and_no_category_match
+      review_required: not_required_by_trigger
+      then: required_tests_must_still_run_and_pass
+      note: this branch never applies to a task whose level already requires review
+
+  independence:
+    reviewer_must_be_fresh_and_context_isolated: true
+    provider_diversity_when_required: cross_provider_or_human_visible_residual_risk_waiver
+
+  safeguards:
+    may_be_strengthened_by: [human, root]
+    may_be_silently_weakened: false
+    routing_may_override_review_required: false
+    retry_may_require_review: false
+
+# --------------------------------------------------------------------------- routing ---
+# Resolves HOW work executes. It never decides whether review is required and carries no
+# copy of that decision.
+routing:
+  decides: how_required_work_and_required_review_execute
+  never_decides: whether_review_is_required
+
+  capability_classes:
+    high_capability: strong reasoning, ambiguity resolution, difficult diagnosis
+    economical: well-scoped execution, search, repetitive change
+    strong_independent: independent verification with capability and provider diversity
+
+  # Preferences, never role identity. A role is not bound to a harness, model or provider.
+  role_preference:
+    root:     {capability: high_capability, reasoning: high,     fallback: any_capable}
+    lead:     {capability: economical,      reasoning: high,     fallback: high_capability}
+    delegate: {capability: economical,      reasoning: high,     fallback: any_capable}
+    reviewer: {capability: strong_independent, reasoning: high,  fallback: any_capable}
+  preferences_are_permanent_bindings: false
+
+  escalation:
+    lead_to_high_capability_when:
+      - difficult_engineering_reasoning
+      - complex_repository_investigation
+      - difficult_debugging
+      - high_risk_or_cross_module_implementation
+      - cheaper_execution_proved_insufficient
+
+  review_route:
+    when_review_required_must_resolve_eligible_reviewer: true
+    eligibility:
+      - fresh_context_isolated_session
+      - capability_class: strong_independent
+      - provider_differs_from_implementer_when_review_independence_requires_it
+    on_no_eligible_reviewer: escalate_authority_blocked
+    may_downgrade_to_none_or_optional: false
+
+# ------------------------------------------------------------------ capability envelope ---
+capabilities:
+  least_capability: grant_only_capabilities_the_assignment_requires
+  progressive_disclosure: escalate_capabilities_stepwise_and_only_on_evidence
+
+  catalog:
+    repo:                  {description: read and edit files inside the asserted worktree scope, sensitive: false}
+    git:                   {description: git inspect and bounded write operations within a task, sensitive: false}
+    python-test:           {description: run test suites and deterministic checks, sensitive: false}
+    runtime-control:       {description: start, wait on and clean cross-harness runtime resources, sensitive: false}
+    delegate-integration:  {description: dispatch and settle writable delegated work (Lead only), sensitive: true}
+    github:                {description: GitHub PR, issue and CI inspection, sensitive: false}
+    system-inspection:     {description: system and process inspection on the host, sensitive: true}
+    ssh:                   {description: SSH access to configured remote environments, sensitive: true}
+    tailscale:             {description: Tailscale identity and network state, sensitive: true}
+    quantitative-analysis: {description: financial, market-data and quantitative computation, sensitive: true}
+
+  profiles:
+    root-standard:        {includes: [repo, git, runtime-control, github]}
+    lead-standard:        {includes: [repo, git, python-test, runtime-control, delegate-integration, github]}
+    delegate-readonly:    {includes: [repo, git, python-test]}
+    delegate-writable:    {includes: [repo, git, python-test]}
+    reviewer-independent: {includes: [repo, git, python-test, github]}
+
+# ----------------------------------------------------------------------------- retry ---
+# Canonical retry budget. No other file, document or test carries these numbers.
+retry:
+  canonical_source: true
+  review_loop:
+    max_cycles: 3
+    counts: one_review_pass_plus_the_fix_that_answers_it
+    on_exhaustion: stop_and_escalate_to_root
+    may_continue_editing_after_exhaustion: false
+  may_require_review: false
+
+# ------------------------------------------------------------------------ efficiency ---
+efficiency:
+  principles:
+    - use_the_cheapest_capable_resource
+    - prefer_deterministic_tools_tests_and_evals_before_model_calls
+    - delegate_when_result_is_needed_but_process_need_not_remain_in_parent_context
+    - report_compressed_evidence_not_transcripts_or_reasoning_dumps
+    - never_narrate_routine_tool_usage
+    - minimize_always_loaded_repository_instructions
+    - reasoning_effort_is_not_a_token_savings_lever
+    - premium_capability_and_reasoning_effort_are_adaptive
+  premium_adaptivity:
+    allowed: true
+    envelope_owner: root
+    decisions_occur_at: [task_start, major_phase_boundary, evidence_based_escalation]
+    hardcoded_high_forbidden: true
+    low_cost_reasoning_stays_high: true
+  cost_levers:
+    - cheaper_capability_routing
+    - targeted_context
+    - load_on_demand_procedures
+    - task_bounded_sessions
+    - compressed_return
+    - deterministic_verification
+
+# ---------------------------------------------------------------------- human gates ---
+# Protected gates. An agent may never relax these on its own; it may propose changes
+# through an issue or a pull request. Canonical home for the gate list.
+human_gates:
+  may_be_relaxed_by_agent: false
+  proposal_channel: issue_or_pull_request
+  protected:
+    - production_trading_permissions
+    - destructive_data_access_restrictions
+    - secret_and_credential_protections
+    - high_risk_independent_review_requirement
+    - order_and_capital_safety_guardrails
+    - maximum_budget_and_concurrency_limits
+    - production_deployment_gates
+    - minimum_backup_retention
+
+# ---------------------------------------------------------------- operating profiles ---
+# Operational context, not a cognitive role.
+operating_profiles:
+  active: travel
+  default:
+    description: operator can intervene by hand
+    writable_delegation: allowed
+  travel:
+    description: operator is away, on an unstable link, and cannot intervene by hand
+    writable_delegation: forbidden
+    delegate_permissions: [read_only, run_tests, produce_patch_suggestions_only]
+    integration: deferred_until_operator_returns
+    exit_condition: set active to default when the operator can intervene by hand again
