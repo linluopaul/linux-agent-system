@@ -18,6 +18,19 @@ external writable work is involved, give it an isolated worktree.
 Verify isolation from outside the writable checkout: the protected checkout stays clean and
 its HEAD unchanged.
 
+## Reusing an existing worktree
+
+An existing writable delegated worktree may be reused **only when both hold**:
+
+- it is clean; and
+- its current base and provenance already match the declared immutable base required for
+  this delegated work.
+
+If either condition fails, **do not reset, repoint, retarget or otherwise move an existing
+result branch merely to make it match the requested base.** Create or use a fresh isolated
+worktree and a fresh result branch from the declared base instead; if that cannot be done
+safely, escalate rather than forcing the reuse.
+
 ## Integration
 
 The **Lead owns verified integration**. Integrate deliberately, verify ancestry, scope and

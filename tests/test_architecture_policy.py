@@ -674,45 +674,7 @@ def _file_harness_assignment_claims(path: Path, spelling_to_key) -> list[tuple[s
     ]
 
 
-WRITABLE_WORKER_LIFECYCLE_DOCUMENTS = (
-    ".agent/skills/orca-writable-delegation/SKILL.md",
-    "docs/ARCHITECTURE.md",
-    "docs/runbooks/ORCA_WORKFLOW.md",
-    "docs/decisions/ADR-003-lead-worker-git-integration-contract.md",
-)
-
-SUPERVISED_ROOT_TO_LEAD_DOCUMENTS = (
-    ".agent/skills/orca-writable-delegation/SKILL.md",
-    "docs/ARCHITECTURE.md",
-    "docs/runbooks/ORCA_WORKFLOW.md",
-)
-
-WORKER_START_REQUIREMENT = """
-Every supervised writable Worker MUST be launched through
-`orca orchestration worker-start`.
-"""
-
-EXPLICIT_BASE_REQUIREMENT = """
-The launch MUST explicitly select the required Git base using the installed version's
-supported mechanism, currently `--base-branch <integration_base_ref>`; confirm that
-mechanism against the version-matched installed Orca guide before dispatch.
-"""
-
-LOW_LEVEL_LAUNCH_PROHIBITION = """
-For supervised writable Workers, the Execution Lead MUST NOT use `worktree create` plus
-`orchestration dispatch --inject` as the launch path; that low-level path may create a
-dispatch visible to `dispatch-show` without registering the Worker in Orca's `worker-*`
-lifecycle registry, so `worker-release` cannot settle it.
-"""
-
-ROOT_TO_LEAD_WORKER_START_REQUIREMENT = """
-Every supervised writable Root-to-Execution-Lead dispatch MUST be launched through
-`orca orchestration worker-start`; low-level `worktree create` plus
-`orchestration dispatch --inject` does not register the Lead in Orca's `worker-*` lifecycle
-registry, so the Root cannot settle it with `worker-release`.
-"""
-
-EXISTING_WORKTREE_BASE_REQUIREMENT = """
+ROOT_TO_LEAD_EXISTING_WORKTREE_BASE_REQUIREMENT = """
 When `worker-start` targets `current`, an existing worktree, or `--terminal <handle>`, the
 installed CLI rejects `--base-branch`; explicit base selection is satisfied only by the
 guarded pre-dispatch HEAD equality proof recorded in the assignment.
@@ -723,31 +685,6 @@ RETRY_BASE_REQUIREMENT = """
 `--on`/`--worktree` and `--agent`/`--terminal` choices, and either repeat
 `--base-branch <integration_base_ref>` for a new worktree or rerun and record the guarded
 equality proof for reuse.
-"""
-
-WORKER_RELEASE_REQUIREMENT = """
-Settlement MUST include successful `worker-release` before result-delivery acknowledgment
-and before the Worker branch/worktree is retained or removed according to settlement
-policy.
-"""
-
-RELEASE_BEFORE_ACK_REASON = """
-Orca replays an unacknowledged Delivery, so the writable Worker terminal MUST be
-successfully released before the batch is acknowledged.
-"""
-
-WRITABLE_WORKER_LIFECYCLE = """
-Lead creates Worker through `worker-start` with explicit base
-  → Worker verifies `HEAD == integration_base_sha` before tracked edits
-  → Worker implements / verifies / commits
-  → immutable result packet
-  → `worker_done`
-  → Lead validates result
-  → Lead cherry-picks ordered commits
-  → Lead verifies integrated state
-  → `worker-release` succeeds
-  → result delivery acknowledged
-  → Worker branch/worktree retained or removed per settlement policy
 """
 
 
@@ -1171,32 +1108,6 @@ class ArchitecturePolicyTests(unittest.TestCase):
             )
         self.assertIn("resolved by policy", descriptor)
 
-    def test_skill_preserves_existing_worktree_reuse_invariant(self) -> None:
-        """v2.1.1 F2: the guarded worktree-reuse invariant must live at its canonical home
-        in the writable-delegation Skill, stated independently of any version-specific flag
-        mechanics.
-
-        This invariant survived only in the ORCA_WORKFLOW runbook after the diet, so an
-        agent loading the Skill (the canonical writable-delegation source) never learned it.
-        Removing it from the Skill fails this test (mutation (b), also in the scratch-
-        checkout bar).
-        """
-        skill_path = ".agent/skills/orca-writable-delegation/SKILL.md"
-        skill = normalize(read(skill_path)).lower()
-        self.assertIn(
-            "an existing worktree may be reused only when it is clean and already at the "
-            "declared base",
-            skill,
-        )
-        self.assertIn(
-            "creates a fresh worker branch without repointing an existing result branch",
-            skill,
-        )
-        # The concrete command sequence stays in the runbook; the Skill references it
-        # rather than duplicating the version-specific alignment recipe.
-        self.assertIn("ORCA_WORKFLOW.md", read(skill_path))
-
-
     def test_agents_md_stays_within_budget(self) -> None:
         """V4: the always-loaded standing source is one short file. The V3 207-line
         instruction layer must not grow back."""
@@ -1207,22 +1118,15 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertLessEqual(size, 4096, "AGENTS.md exceeds the V4 standing-source byte budget")
 
     def test_detailed_lifecycle_not_duplicated_in_always_loaded_files(self) -> None:
-        """The detailed writable-lifecycle procedure is NOT duplicated into the always-
-        loaded layer; it lives at its canonical home in the load-on-demand Skill."""
+        """The detailed writable-work procedure lives in the load-on-demand layer, never
+        in the always-loaded standing source."""
         agents = read("AGENTS.md")
-        skill = read(".agent/skills/orca-writable-delegation/SKILL.md")
-        # AGENTS.md carries invariants and pointers only, never the detailed procedure.
-        for marker in (
-            "Lead creates Worker through",
-            "git cherry-pick --skip",
-            "ALREADY_PRESENT",
-        ):
+        for marker in ("immutable base commit", "resources_clean", "cherry-pick", "--session"):
             self.assertNotIn(marker, agents, marker)
-        # The canonical home retains the full procedure.
-        self.assertIn("Lead creates Worker through", skill)
-        self.assertIn("ALREADY_PRESENT", skill)
-        self.assertIn("git cherry-pick --skip", skill)
-
+        procedure = read(".agent/procedures/writable-work.md")
+        self.assertIn("immutable base commit", procedure)
+        self.assertIn("resources_clean", procedure)
+        self.assertIn("--session", procedure)
 
     def test_retry_budget_has_one_canonical_source(self) -> None:
         """The review/fix budget lives in exactly one place and is bounded."""
@@ -1388,14 +1292,82 @@ class ArchitecturePolicyTests(unittest.TestCase):
             self.assertIn(protected, gates["protected"], protected)
 
     def test_retired_agent_surfaces_are_gone(self) -> None:
-        """The V3 role, harness, provider and multi-file policy surfaces no longer exist."""
-        for directory in (".agent/roles", ".agent/harnesses", ".agent/providers",
-                          ".agent/policies"):
-            self.assertFalse(
-                (ROOT / directory).exists(), f"retired directory still present: {directory}"
+        """Retired V3 surfaces must not return to the tracked tree: the role, harness,
+        provider and multi-file policy layers, the Orca writable-delegation Skill, the
+        Orca runbook, the in-repo Orca GUI persistence units, and placeholder-only
+        scaffolding that no longer has a V4 purpose."""
+        tracked = set(tracked_repository_paths() or [])
+
+        retired_files = (
+            ".agent/skills/orca-writable-delegation/SKILL.md",
+            "docs/runbooks/ORCA_WORKFLOW.md",
+        )
+        for relative in retired_files:
+            self.assertNotIn(ROOT / relative, tracked, f"retired file returned: {relative}")
+
+        retired_trees = (
+            ".agent/roles", ".agent/harnesses", ".agent/providers", ".agent/policies",
+            ".agent/skills", ".agent/runs", "infra", "src", "controller", "data", "evals",
+        )
+        for directory in retired_trees:
+            present = sorted(
+                str(p.relative_to(ROOT)) for p in tracked
+                if str(p.relative_to(ROOT)).startswith(directory + "/")
             )
-        self.assertTrue((ROOT / ".agent" / "policy.yaml").exists())
-        self.assertTrue((ROOT / ".agent" / "capabilities.md").exists())
+            self.assertEqual([], present, f"retired tree has tracked files: {directory}")
+
+        # The V4 agent surface is exactly policy, capabilities and load-on-demand procedures.
+        agent_surface = sorted(
+            str(p.relative_to(ROOT)) for p in tracked
+            if str(p.relative_to(ROOT)).startswith(".agent/")
+        )
+        self.assertEqual(
+            [".agent/capabilities.md", ".agent/policy.yaml"],
+            [p for p in agent_surface if not p.startswith(".agent/procedures/")],
+        )
+        self.assertTrue([p for p in agent_surface if p.startswith(".agent/procedures/")])
+
+    def test_remote_work_runbook_is_current_v4_not_orca_runtime(self) -> None:
+        """The remote-work runbook describes the current runtime, not the retired one."""
+        runbook = read("docs/runbooks/REMOTE_WORK.md").lower()
+        for retired in ("worker-start", "worker-release", "orca-ide", "orca gui",
+                        "dispatch", "orca"):
+            self.assertNotIn(retired, runbook, f"retired Orca mechanic in runbook: {retired}")
+
+    def test_herdr_session_targeting_safety_is_documented(self) -> None:
+        """Explicit --session targeting, and the reason HERDR_SESSION alone is unsafe,
+        must survive in the canonical procedure and in the remote-work runbook."""
+        for relative in ("docs/runbooks/REMOTE_WORK.md", ".agent/procedures/writable-work.md"):
+            document = read(relative)
+            self.assertIn("--session", document, relative)
+            self.assertIn("HERDR_SOCKET_PATH", document, relative)
+            self.assertIn("HERDR_SESSION", document, relative)
+
+    def test_writable_work_reuse_requires_clean_declared_base(self) -> None:
+        """Reusing an existing writable worktree is safe only when it is clean AND already
+        at the declared immutable base. A mismatch must never be resolved by moving an
+        existing result branch onto the requested base.
+
+        This invariant previously lived only in the retired writable-delegation Skill; it
+        is general Git/worktree safety and belongs to the V4 canonical procedure.
+        """
+        procedure = normalize(read(".agent/procedures/writable-work.md")).lower()
+
+        # 1. reuse requires a clean worktree
+        self.assertIn("may be reused **only when both hold**", procedure)
+        self.assertIn("it is clean", procedure)
+
+        # 2. reuse requires the existing base/provenance to already match the declared base
+        self.assertIn("base and provenance already match the declared immutable base", procedure)
+
+        # 3. a mismatch must not be forced by repointing an existing result branch
+        for forbidden_move in ("reset", "repoint", "retarget"):
+            self.assertIn(forbidden_move, procedure, forbidden_move)
+        self.assertIn("do not reset, repoint, retarget", procedure)
+        self.assertIn("fresh isolated worktree and a fresh result branch", procedure)
+        self.assertIn("escalate rather than forcing the reuse", procedure)
+
+
 
 
 

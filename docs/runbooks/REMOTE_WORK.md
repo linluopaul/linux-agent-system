@@ -1,37 +1,43 @@
 # 远程工作操作手册
 
-> 在外每天用。背景、理由、验收证据一律见 `docs/NODES.md`，本文只放能直接照做的。
+> 在外每天用。只放能直接照做的步骤。机器与网络清单见 `docs/NODES.md`；架构定义见
+> `docs/ARCHITECTURE.md`。
 
 ## 连接（按优先级）
 
 ```bash
 ssh desktop                 # 纯终端。最可靠，弱网首选，不依赖任何图形组件
-claude --remote-control     # 想让手机能接管这个会话时这样起（--resume 出来的默认不带）
-orca-ide status --json      # Orca 一律用 --json，带宽极低
+claude --remote-control     # 想让手机接管这个会话时这样起（--resume 出来的默认不带）
 ```
 
-**要图形界面**：`mstsc /v:agent-desktop`（Windows 自带，连接前在「显示」标签调分辨率）
-**Orca Web**：先 `ssh desktop`（config 已自动建隧道），浏览器开 `http://localhost:6768/...`
-——**必须用 `localhost`**，用主机名会白屏。
-**移动中**：手机 Orca app（连接模式选 local-only）；`/remote-control` 后手机可接管终端会话。
+**要图形界面**：`mstsc /v:agent-desktop`（Windows 自带，连接前在「显示」标签调分辨率）。
+**移动中**：手机上接管已用 `--remote-control` 起的终端会话。
 
-**发编排任务（worker）前必做**——GUI 没开则 `worker-release` 必然失败：
+## 工作路径
+
+1. 远程进入 Desktop；
+2. 在目标项目的 checkout 或 worktree 内工作；
+3. 需要运行时编排时，用 Herdr 作为跨 harness 的 runtime substrate；
+4. 按 V4 的 Root / Lead / Delegate / Reviewer 模型推进。
+
+## Herdr 定位安全（必守）
+
+每一次 Herdr mutation 都必须显式指定目标 session：
 
 ```bash
-orca-ide status --json | grep desktopWindowStatus       # 须为 available，否则跑下一条
-DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority orca-ide open --json
-export ORCA_TERMINAL_HANDLE=$(cat ~/.orca-root-handle)  # 协调者身份，须已落盘
+herdr --session <name> <subcommand>
 ```
+
+**不要只依赖 `HERDR_SESSION`**：在 agent pane 内继承的 `HERDR_SOCKET_PATH` 会优先决定
+目标 session，未加限定的命令可能作用于当前所在的 session。
+
+可写工作的 base、集成与清理见 `.agent/procedures/writable-work.md`；委派见
+`.agent/procedures/delegate.md`；断点续做见 `.agent/procedures/checkpoint.md`。
 
 ## 断线恢复
 
-任务不会因断线而死（daemon 独立存活）。重连后：
-
-```bash
-ssh desktop
-orca-ide status --json      # 若显示 stale_bootstrap / 不可达：
-orca-ide open --json        # 跑这一条即可接回，worktree 与 terminal 状态完整保留
-```
+断线不必然终止已在运行的工作。重连后先确认运行时与 Git 状态，再决定是继续还是从最新
+checkpoint 恢复；不要凭断线前的印象直接续做。
 
 ## Desktop 不可达时的处置
 
@@ -55,9 +61,9 @@ gnome-shell --replace &                    # 显示器已接回但仍黑屏 → 
 
 ## 出行期风险策略
 
-`.agent/policies/risk.yaml` → `profiles.active`，**当前 = `travel`**：禁止 writable
-delegation；Worker 只读、只跑测试、只出 patch 建议，集成待返回后做。
-回家后改回 `default`（或 P1-A 证完 Git Integration Contract，以先到者为准）。
+`.agent/policy.yaml` → `operating_profiles.active`，**当前 = `travel`**：禁止 writable
+delegation；Delegate 只读、只跑测试、只出 patch 建议，集成待返回后做。可介入时改回
+`default`。
 
 ## 其它故障
 
