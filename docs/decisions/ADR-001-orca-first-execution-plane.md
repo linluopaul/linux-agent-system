@@ -9,6 +9,14 @@
 > Accepted, and all Orca-first runtime, Controller-boundary and Herdr-optional decisions
 > remain in force.
 
+> Supersession note (2026-09-09): ADR-008 supersedes the Orca-first execution-plane
+> decision recorded below. Orca is no longer the execution and review plane; Herdr is the
+> V4 runtime substrate. The decision text and rationale below are retained unchanged as the
+> historical record of what was decided on 2026-08-18, and must not be rewritten to suggest
+> that Herdr was the original intent. This note narrows the note above: the Orca-first
+> runtime and Herdr-optional statements it preserved are no longer current policy, while
+> the Controller-boundary decision and ADR-002's provider-role supersession still stand.
+
 ## Context
 
 The initial architecture made Herdr the default execution and communication plane and gave

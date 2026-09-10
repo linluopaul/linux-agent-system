@@ -9,13 +9,9 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
-# Runtime data
-.agent/runs/*
-!.agent/runs/.gitkeep
-
-# Large/local data
-data/*
-!data/.gitignore
+# Local data
+.agent/runs/
+data/
 
 # Logs
 *.log

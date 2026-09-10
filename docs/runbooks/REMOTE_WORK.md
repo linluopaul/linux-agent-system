@@ -1,63 +1,62 @@
 # 远程工作操作手册
 
-> 在外每天用。背景、理由、验收证据一律见 `docs/NODES.md`，本文只放能直接照做的。
+> 在外每天用。只放能直接照做的步骤。机器与网络清单见 `docs/NODES.md`；架构定义见
+> `docs/ARCHITECTURE.md`。
 
 ## 连接（按优先级）
 
 ```bash
 ssh desktop                 # 纯终端。最可靠，弱网首选，不依赖任何图形组件
-claude --remote-control     # 想让手机能接管这个会话时这样起（--resume 出来的默认不带）
-orca-ide status --json      # Orca 一律用 --json，带宽极低
+claude --remote-control     # 想让手机接管这个会话时这样起（--resume 出来的默认不带）
 ```
 
-**要图形界面**：`mstsc /v:agent-desktop`（Windows 自带，连接前在「显示」标签调分辨率）
-**Orca Web**：先 `ssh desktop`（config 已自动建隧道），浏览器开 `http://localhost:6768/...`
-——**必须用 `localhost`**，用主机名会白屏。
-**移动中**：手机 Orca app（连接模式选 local-only）；`/remote-control` 后手机可接管终端会话。
+**要图形界面**：`mstsc /v:agent-desktop`（Windows 自带，连接前在「显示」标签调分辨率）。
+**移动中**：手机上接管已用 `--remote-control` 起的终端会话。
 
-**发编排任务（worker）前必做**——GUI 没开则 `worker-release` 必然失败：
+## 工作前检查
+
+进入目标项目 checkout/worktree，核实 Git 与 Herdr 状态。先查 `.agent/policy.yaml` 的
+`operating_profiles.active` 及对应 profile、`human_gates`；权限与限制以 policy 为准。
+
+## Herdr 定位安全（必守）
+
+每一次 Herdr mutation 都必须显式指定目标 session：
 
 ```bash
-orca-ide status --json | grep desktopWindowStatus       # 须为 available，否则跑下一条
-DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority orca-ide open --json
-export ORCA_TERMINAL_HANDLE=$(cat ~/.orca-root-handle)  # 协调者身份，须已落盘
+herdr --session <name> <subcommand>
 ```
+
+**不要只依赖 `HERDR_SESSION`**：在 agent pane 内继承的 `HERDR_SOCKET_PATH` 会优先决定
+目标 session，未加限定的命令可能作用于当前所在的 session。
+
+可写工作的 base、集成与清理见 `.agent/procedures/writable-work.md`；委派见
+`.agent/procedures/delegate.md`；断点续做见 `.agent/procedures/checkpoint.md`。
 
 ## 断线恢复
 
-任务不会因断线而死（daemon 独立存活）。重连后：
-
-```bash
-ssh desktop
-orca-ide status --json      # 若显示 stale_bootstrap / 不可达：
-orca-ide open --json        # 跑这一条即可接回，worktree 与 terminal 状态完整保留
-```
+断线不必然终止已在运行的工作。重连后先确认运行时与 Git 状态，再决定是继续还是从最新
+checkpoint 恢复；不要凭断线前的印象直接续做。
 
 ## Desktop 不可达时的处置
 
 先分清是哪一层，别盲查：
 
-| 现象 | 结论 | 下一步 |
+| 现象 | 优先排查 | 下一步 |
 |---|---|---|
-| **RDP 不通，`ssh desktop` 通** | 图形层问题，**不是网络** | 见下方「RDP 黑屏 / 闪退」 |
-| **SSH 与 RDP 同时不通** | 网络层 | 查 Tailscale：本机 app 是否 Connected；`tailscale status` 看 Desktop 在不在线 |
+| **RDP 不通，`ssh desktop` 通** | 图形服务或 RDP 路径 | 见下方「RDP 黑屏 / 闪退」 |
+| **SSH 与 RDP 同时不通** | 网络、服务或主机状态 | 查 Tailscale：本机 app 是否 Connected；`tailscale status` 看 Desktop 在不在线 |
 | **仅 SSH 拒绝** | sshd 或 key 问题 | 用 RDP / 向日葵进去查 `systemctl status ssh` |
-| **全都不通** | 机器无响应 | 向日葵（走云中继，独立于 tailnet）；仍不通则**无法远程恢复，等待返回**，不要无限重试 |
+| **全都不通** | 远程通道或主机不可用 | 向日葵（走云中继，独立于 tailnet）；仍不通则**无法远程恢复，等待返回**，不要无限重试 |
 
-**RDP 黑屏 / 一连上就闪退**——几乎都是显示器问题（Desktop Sharing 抓的是物理显示器）：
+**RDP 黑屏 / 闪退**：先检查物理显示器连接（Desktop Sharing 依赖该显示源）：
 
 ```bash
 ssh desktop
 export DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority
-xrandr --query | grep -E "connected"      # 全是 disconnected → 显示器断电，需有人开机
-gnome-shell --replace &                    # 显示器已接回但仍黑屏 → 合成器没重建，这条修
+xrandr --query | grep -E "connected"      # 若全是 disconnected，请现场确认显示器供电/连接
+# 确认连接恢复且证据指向合成器后，按 policy 的权限/闸门决定是否执行：
+gnome-shell --replace &
 ```
-
-## 出行期风险策略
-
-`.agent/policies/risk.yaml` → `profiles.active`，**当前 = `travel`**：禁止 writable
-delegation；Worker 只读、只跑测试、只出 patch 建议，集成待返回后做。
-回家后改回 `default`（或 P1-A 证完 Git Integration Contract，以先到者为准）。
 
 ## 其它故障
 

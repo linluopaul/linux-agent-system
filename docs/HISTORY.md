@@ -1,291 +1,86 @@
-# 多 Agent 开发系统 History
+# Linux Agent System — 历史记录
 
-> 版本：v2.0
-> 日期：2026-08-27
-> 取代：`LINUX_AGENT_SYSTEM_PROJECT_HISTORY_CLEANUP_v2_HERMES_CONTROL_PLANE.md`
+本文记录当时的选择、放弃理由与后续转向，不提供当前操作指令。
+当前架构见 `docs/ARCHITECTURE.md`；候选状态见 `docs/PROJECT_STATE.md`；未来工作见
+`docs/ROADMAP.md`。下列旧术语均按其决策时间理解，不能覆盖 ADR-008 与当前规范。
 
-## 本文档的唯一用途
+## 决策索引与沿革
 
-**记录走过且不再走的路。**
+ADR 原文保留为决策记录；部分原则延续，不代表旧角色、接口或运行时机制仍然有效。
 
-`AGENTS.md` 规定了 "do not revive deprecated designs"。这条规则只有在废弃设计可被查到时
-才可执行——本文档就是那份可查记录。
-
-本文档**不**记录：当前架构（见 `ARCHITECTURE.md`）、交付状态与现行约束（见
-`PROJECT_STATE.md`）、未完成计划（见 `ROADMAP.md`）。
-
-与 `PROJECT_STATE.md` §2 的分工：该处记**现行采用方案的约束条件**，本文档记**曾考虑过但
-不采用的方案及理由**。同一个技术名词可能两处都有一行，内容不同。
-
-判断某内容是否属于本文档，只需一问：**它能阻止未来的人或 agent 重做一遍已经否决过的事吗？**
-不能，就不该写在这里。
-
----
-
-# 1. 已废弃的设计
-
-按废弃时间倒序。
-
-## Claude Desktop / Claude Code 桌面版 SSH 作为日常界面
-
-**否决时间**：2026-08-27
-
-**曾经的设想**：Windows Travel Laptop 装 Claude Code 桌面版，用其 SSH 环境连接 Linux
-Desktop，作为**首选日常图形界面**——代码留在远端、执行在远端、笔记本只是界面。曾为此设计过
-「在桌面版 SSH 会话中实测 Orca orchestration 边界」的验证步骤。
-
-**否决理由**：Remote 支持差、bug 多。全部转终端 Claude Code。
-
-**连带结论**：
-
-- 手机远程接入不走桌面应用，改用**终端 Claude Code + Remote Control**，蜂窝网可用；
-- 原先担心的「手机接入宿主依赖 Windows 笔记本开机」问题随之消失；
-- 笔记本上因此**不需要** Anthropic 凭据，原「凭据放宽」记录不再适用。
-
-**保留在此的理由**：这条曾被论证得相当充分（零安装、代码不本地化、SSH config 复用），
-容易被重新提出。否决依据是实际使用体验，不是设计缺陷——**重提前需要新的产品证据**。
-
-## Zellij
-
-**否决时间**：2026-08-27
-
-**否决理由**：试用后删除。观感不合；默认快捷键与 Claude Code 多处冲突。
-
-## Shadowrocket 的 Tailscale 模块
-
-**否决理由**：数据层从未握手。详见 `NODES.md` §已排除的方案。
-
-## Splashtop / AnyDesk / Chrome Remote Desktop
-
-**否决理由**：与向日葵同类——走厂商云中继、绕开 tailnet 与 ufw 管控。换牌子不解决问题。
-向日葵已保留一份作为绕开 tailnet 的独立兜底通道（代价已记录在 `PROJECT_STATE.md` §2），
-不需要第二份。
-
-## Buzz（人机共享工作区）
-
-**评估时间**：2026-08-26
-
-**曾经的设想**：用 Buzz 让人、Claude Code、Codex 在同一个 session 里共享上下文，共同讨论
-需求与计划。
-
-**否决理由**：
-
-1. 核心价值是**团队**共享上下文；单人场景下评测明确不推荐，理由是没有团队时现有工具用更少
-   的活动部件就能做到同样的事；
-2. 会引入第二套 system of record（Nostr relay，自带 git 托管）与第二套编排平面，与
-   「GitHub 是 durable system of record、Orca 是执行与编排平面」两条不变量冲突；
-3. 无 per-task 隔离、无 terminal orchestration，因此不能替代 Orca，只能叠在旁边；
-4. token 效率差；移动端未成熟。
-
-**触发重评的条件**：出现第二个人类参与者。
-
-## 讨论会话与 Root 分为两层
-
-**否决时间**：2026-08-27
-
-**曾经的设想**：讨论在一个会话里进行，Root 是另一个只负责派活与收结果的会话。
-
-**否决理由**：讨论结束后需求、验收、架构方向已定，Root 只剩转发，退化为传声筒；且判断分散
-在两处，outcome 责任归属不清——与「一个 task outcome 只有一个 Root owner」冲突。
-
-## Herdr 作为讨论会话载体
-
-**否决时间**：2026-08-27
-
-**否决理由**：Herdr 解决的是「无人值守时进程存活」，讨论没有这个需求。tmux 已足够。
-
-## Hermes Supervisor / Control Plane
-
-**曾经的设想**：在人与 Orca 之间设一个长期存活的 supervisor agent，承担 project registry、
-memory、provider routing、budget policy、approval policy、result interpretation、
-advisory relay 七项职责。
-
-**废弃时间**：2026-08-21。完整记录见 ADR-006。
-
-**废弃理由**：七项职责经审查后重新落位——project coordination / result interpretation →
-Root；provider routing / budget / approval → Thin Controller；memory → git；
-project registry → 配置文件；advisory relay 无可执行定义，取消。
-
-这一拆分沿「**需要判断的** vs **不需要判断的**」这条缝进行，优于按「控制 vs 执行」拆分。
-重新合并为单一组件的代价是：一个既做判断又管策略的组件无法做确定性测试，出错时也无法定位
-是判断错误还是策略错误。
-
-此外，把 memory 放入 Hermes 等于把项目知识放入一个 harness，直接违反核心不变量。
-
-**曾提出的三条支持理由及其实际解法**（保留以防重提）：
-
-1. *Orca 层级混乱，希望有 agent 代为维护* → 实为**可视化 + lint** 问题。状态机需要 linter，
-   不需要 supervisor。见 `ROADMAP.md` P1-C。
-2. *希望利用 Hermes 的记忆功能实现跨 harness 复用* → 跨 harness 复用由 git 保证。真实缺口
-   是 Layer E 为手工流程。见 `ROADMAP.md` P1-D。
-3. *Claude Code 的 feedback 过长* → 输出契约已存在但未生效。见 `ROADMAP.md` P1-B。其中
-   「帮我起草回应」这部分成立，现已装进 Root，见 `ROADMAP.md` P0-B。
-
-## 总结 Agent（Summarizer Layer）
-
-**曾经的设想**：在 Execution Lead 与人之间加一层 agent，压缩过长的 feedback。
-
-**废弃时间**：2026-08-21
-
-**废弃理由**：先花 token 生成长文本再花 token 压缩，双重成本；压缩过程最可能丢弃
-`UNCERTAINTY` 与 `BLOCKERS`，而这两项恰是唯一不能被平滑的信号。
-
-## Pi Supervisor
-
-**曾经的设想**：以 Pi 作为常驻 supervisor。`ARCHITECTURE.md` §6.6 与 §7.4 曾为其"保留抽象
-空间"。
-
-**废弃理由**：与 Hermes 同源的错误——把 supervisor 绑定到具体 harness。Pi 现为 harness，
-运行时选择模型，不承担 supervisor 角色。ADR-006 否定了「长期存活的 supervisor agent」这一
-形态整体。
-
-**2026-08-27 补记**：§6.6 与 §7.4 的"保留空间"表述已删除。这两处曾是文档中唯一会主动误导的
-内容——它们不但没标废弃，还写着"保留"。
-
-## Codex-First 实现策略
-
-**曾经的设想**：以 Codex 为主要实现引擎。
-
-**废弃理由**：转为 Claude Code First。角色与 provider 的绑定改为 `routing.yaml` 中的偏好，
-非永久绑定。
-
-## Herdr 作为默认执行平面
-
-**曾经的设想**：Herdr 承担默认执行与通信平面。
-
-**现状**：降级为可选基础设施。切换执行平面需推翻 ADR-001，须走 ADR + 人批准。现行的个人
-终端会话用法及其边界见 `PROJECT_STATE.md` §2。**不得作为 Orca 失败时的静默 fallback。**
-
-## 固定 Architect → Coder → Reviewer 流水线
-
-**废弃理由**：改为 Root 对 outcome 负责、定义 bounded work，由 Execution Lead 根据风险、
-能力、成本与证据动态组织执行。
-
-## 大段对话转移作为上下文传递方式
-
-**问题**：token 浪费、恢复能力差、状态归属不清。
-
-**现状**：Execution Packet + terse block；完整 transcript 默认不作为未来 task context。
-
----
-
-# 1.1 已被实测证伪的说法
-
-这些曾被当作事实写进文档或用于决策，实测后不成立。
-
-| 说法 | 证伪时间 | 实际情况 |
-|---|---|---|
-| 「只有 tmux 才能扛断线」 | 2026-08-27 | Orca 终端由 daemon 托管，shell 死掉（网断 / SSH 掉 / tmux 被杀）不影响终端与 worker。tmux 的作用是保护 Root 自身会话，不是保护 agent 存活 |
-| 「Orca 存在终端记录累积、release 恒有缺口」 | 2026-08-27 | GUI 开启时 `terminal list` 正常显示、release 正常工作。真实约束是 GUI 必须开着。**P1-C 的 lineage lint 不需要为此做例外** |
-| 「Codex MCP 不支持多轮接续」 | 2026-08-27 | 该说法来自一个日期不明的社区包装器说明。官方 MCP 模式有发起与接续两个工具，很可能本来就支持。待实测（P0-B） |
-| 「`pgrep -f '^/opt/Orca/orca-ide$'` 可判断 GUI 存活」 | 2026-08-27 | daemon 拉起 GUI 时命令行带参数，精确匹配失配。唯一可靠判据是 `desktopWindowStatus` |
-
----
-
-# 2. 关键决策
-
-已进入 ADR 的决策此处只留指针，不重述内容。
-
-| 决策 | 记录位置 |
+| 记录 | 历史选择与 V4 关系 |
 |---|---|
-| Orca 作为 first execution plane | `docs/decisions/ADR-001-orca-first-execution-plane.md` |
-| Cognitive 与 Engineering 双控制平面 | `docs/decisions/ADR-002-cognitive-and-engineering-control-planes.md` |
-| Lead-Worker Git 集成契约 v1 | `docs/decisions/ADR-003-lead-worker-git-integration-contract.md` |
-| Role / Harness / Model / Capability 分离与 execution-cost metrics | `docs/decisions/ADR-004-role-harness-model-capability-separation.md` |
-| Instruction diet 与 adaptive premium reasoning | `docs/decisions/ADR-005-instruction-diet-and-adaptive-premium-reasoning.md` |
-| Hermes 退役，职责拆分至 Root 与 Thin Controller | `docs/decisions/ADR-006-hermes-retirement.md` |
-| Root 移出 Orca + 任务入口从 Issue 变为人 | 待写，见 `ROADMAP.md` P1-F |
-| Thin Controller 命名约束 | 本文档 §3 |
+| [ADR-001](decisions/ADR-001-orca-first-execution-plane.md) | 曾采用 Orca-first 执行平面；该选择被 ADR-008 取代。 |
+| [ADR-002](decisions/ADR-002-cognitive-and-engineering-control-planes.md) | 分离 outcome ownership 与工程执行；V4 以 Root != Lead 保留该原则，旧 packet、拓扑及重入机制部分被取代。 |
+| [ADR-003](decisions/ADR-003-lead-worker-git-integration-contract.md) | 从实际 Git ancestry 与运行时 lineage 不一致中形成集成契约；V4 保留 immutable base/provenance、隔离、Lead 验证集成及安全清理，取代 Worker/Orca 拓扑。 |
+| [ADR-004](decisions/ADR-004-role-harness-model-capability-separation.md) | 保留 role/harness/model/capability 分离；其中未来 Pi Supervisor 设想后来由 ADR-006 否决。 |
+| [ADR-005](decisions/ADR-005-instruction-diet-and-adaptive-premium-reasoning.md) | 保留 instruction diet、单一规则归属与 adaptive reasoning；旧文件布局及 Execution Packet 形态被 V4 收缩。 |
+| [ADR-006](decisions/ADR-006-hermes-retirement.md) | Hermes Supervisor 退役；长期推理型 supervisor 的设想未被 V4 恢复。 |
+| [ADR-007](decisions/ADR-007-review-loop-ownership.md) | 将 review/fix loop 交给 Lead，减少 Root 往返；V4 保留独立原始 verdict 与 policy 约束，替换旧运行时传输。 |
+| [ADR-008](decisions/ADR-008-v4-cognitive-architecture-and-herdr-runtime.md) | 2026-09-08 接受的 V4 决策锚：四角色、稳定 Root 身份、Herdr runtime、最小契约与 checkpoint 延续。 |
 
-现行采用方案的约束条件（不含否决理由）见 `PROJECT_STATE.md` §2。
+ADR-002 后补的部分 supersession 注记与 ADR-008 当时未指定其最终状态的文字保留各自时间语境，
+不反向改写旧记录。实测依据及其不确定性保留在 ADR 中，不在此复制报告。
 
----
+## 2026 年 8 月：从控制平面设想退出
 
-# 3. 命名与词汇约束
+Hermes 曾被设想为人与 Orca 之间长期存在的 Supervisor，兼管 registry、memory、routing、
+budget、approval 与结果解读。2026-08-21 的退役决定认为这些职责不应混为一个推理 Agent：
+判断与 outcome 归属留给 Root，确定性约束和运维职责另行落位，持久知识进入 Git。
+保留此记录是为了避免以另一个名称重新合并相同职责；详细取舍见 ADR-006。
 
-## Thin Controller 的命名约束
+同一时期放弃独立 Summarizer：先生成长输出再用 Agent 压缩增加成本，并容易抹掉
+UNCERTAINTY 与 BLOCKERS。后续演进采用压缩返回及可独立核查的证据，而非增加认知层。
 
-Thin Controller 是一段确定性代码，**不得与任何 harness 或 agent 共用名称**。共用名称会使
-agent 语义从命名层重新渗入一个被明确定义为「不是另一个 AI Agent」的组件。
+2026-08-27 放弃“讨论会话 + 只转发任务的 Root”两层设计：判断被分散后，outcome 责任不清。
+固定 Architect → Coder → Reviewer 流水线也被动态职责分工替代，避免把所有工作套进同一路径。
 
-因此本项目不为 Controller 取拟人化代号。它就叫 Thin Controller。
+## V3 的运行时与 provider 偏好，及其后续反转
 
-## 词汇变更表
+V3 当时选择 Orca execution/review plane，使用 Run、Dispatch、Worker 等运行时词汇，
+并将 Herdr 视为 optional infrastructure。2026-08-27 还曾以“讨论不需要无人值守存活”为由，
+放弃 Herdr 作为讨论载体。这些是当时的判断，不是对 V4 Herdr 用法的限制。
 
-在旧文档、旧对话或外部资料中遇到左列词汇时，应理解为右列，或理解为已废弃。
+旧文档曾记录 Codex-First、随后 Claude Code First，以及 Claude Code 默认 Root harness 的
+偏好；词汇表又让这些偏好看起来像身份绑定。ADR-004 的分离原则经 V4 延续，旧偏好不再是
+当前 routing 的来源，更不能解释为永久 Root=Claude 或其他 role=model 关系。
 
-| 旧词 | 现状 |
+旧 Execution Packet + terse block 是放弃大段对话转移之后的中间方案，并非最终接口。
+随着 packet 字段、六条件重入清单和多层指令被反复复制，规则漂移与父上下文负担增加，
+这成为继续收缩的理由，而不是恢复旧机制的依据。
+
+## 2026 年 9 月：V4 验证与仓库收缩
+
+ADR-008 在 Herdr 验证证据基础上改变了 V3 的运行时选择，而非声称 Herdr 从来就是默认。
+V4 将认知角色收敛为 Root、Lead、Delegate、Reviewer；Child Root 按递归 Root 理解。
+Herdr 被放到跨 harness runtime substrate 边界，运行时对象不再充当认知角色。
+
+指令负担通过短 standing source、按需 procedures 与 policy 派生执行元数据收缩。
+跨会话延续采用同一 ROOT_ID、Context Checkpoint 与 Git/GitHub；checkpoint 是延续状态，
+并未另建持久知识库。具体契约由 ADR-008 和当前 canonical 文件承载。
+
+迁移期间仓库内 Orca runtime 及外部 persistence 退役。保留的 Orca IDE 应用本体不属于
+当前系统 runtime；GNOME Orca 屏幕阅读器是另一产品且未被触碰。记录见
+`docs/inventory/agent-desktop.md`；此处不复制退役操作过程。
+
+本次 clean-rebuild intake 发现已有 V4 结构可继续收缩，无需从零重建或重新设计架构。
+最终收缩以两个原子批次替代旧 G2/G3 收尾安排：规范与 guards 收缩后，形成历史、状态和
+路线图的文档收口候选。删除旧 Issue task scaffold 与空占位文件，保留 ADR 决策证据。
+这记录的是候选形成过程，不代表最终独立复核或整个 migration 已验收完成。
+
+## 保留的使用体验与知识落库教训
+
+以下是 2026 年 8 月的评估背景，不是对今天产品能力的判断；重评需新的使用证据。
+
+| 当时方案 | 当时放弃或不追加的理由 |
 |---|---|
-| Hermes / Hermes Supervisor / Hermes Control Plane | 已废弃，拆为 Root + Thin Controller |
-| Pi Supervisor | 已废弃；Pi 现为 harness |
-| Claude Code Root | 改称 **Root / Cognitive Control Plane**；Claude Code 是其默认 harness |
-| Control Plane（单独使用） | 语义已分裂，必须限定为 Cognitive 或 Engineering |
-| Execution Plane | 指 Orca；不再指代 agent 层级 |
-| Orca 作为「ADE / 执行 / 隔离 / 协作 / 编排」全平面 | v3 起收窄为**执行与复核平面**；不再提供 Root workspace |
-| Root workspace（Orca 内的） | 已废弃概念。Root 在 tmux + 终端，Orca 内只保留一个空的 coordinator 终端作身份载体 |
-| Claude Code 桌面版 SSH / 4B-1 | 已否决，见 §1。日常与手机接入均用终端 Claude Code |
-| 起草助手（独立工具） | 已拆解装进 Root；见 `ROADMAP.md` P0-B |
-| Architect / Coder / Reviewer 流水线 | 已废弃；改为动态角色 |
-| Phase A–E | 已废弃编号；改用 V0–V4 |
-| Priority 1–6（v3.1 backlog） | 已废弃编号；改用 `ROADMAP.md` 的 P0 / P1 / V1–V4 |
-| T-1 ~ T-16（2026-08-27 handoff 编号） | 已并入 `ROADMAP.md` 的 P0 / P1 条目，不再单独维护 |
-| 「P0 = 出行前 / P1 = 出行后」 | 划分已失效（出行已开始）。编号保留，改按 🟢 出行期可做 / 🔴 需回家 分类 |
+| Claude Desktop / Claude Code 桌面版 SSH | 远程使用问题多，当时改用终端及 Remote Control；不构成永久 harness 绑定。 |
+| Zellij | 试用体验及快捷键冲突。 |
+| Shadowrocket Tailscale 模块 | 当时数据层未完成握手。 |
+| 追加 Splashtop / AnyDesk / Chrome Remote Desktop | 当时已保留向日葵作独立云中继兜底，增加同类通道不解决既有边界问题。 |
+| Buzz 共享工作区 | 单人场景收益不足，额外知识存储和编排平面增加负担；多人需求是重评背景。 |
 
----
-
-# 4. 文档结构变更
-
-**2026-08-21**：三份 v3.1 规划文档合并为 `ROADMAP.md` + `HISTORY.md`。
-
-原因：三份文档大量重复 `ARCHITECTURE.md` 的内容，违反 `AGENTS.md` 的 Single normative
-source per rule。重复必然漂移。
-
-**2026-08-27**：`ROADMAP.md`、`HISTORY.md`、`ADR-006` 首次入库；handoff 的 T-1 ~ T-16 并入
-`ROADMAP.md`，不再单独维护清单。
-
-**同日**：`PROJECT_STATE.md` 出现，承担交付状态、环境硬约束、现行决策约束、阻塞条件。四份
-规划类文档的分工由此确定：
-
-| 文档 | 时态 |
-|---|---|
-| `PROJECT_STATE.md` | 现在是什么 |
-| `ROADMAP.md` | 要做成什么样 |
-| `HISTORY.md` | 曾考虑过什么，为什么不做 |
-| `ARCHITECTURE.md` + ADR | 契约是什么 |
-
-**规划文档的长期规则**：只写未完成事项与触发条件；已定内容一律用指针。任一份一旦开始重述
-另一份的内容，就应当削减而非扩充。
-
----
-
-# 5. 教训：知识产生在机器上，未进入 git
-
-**发现时间**：2026-08-27（同日两个实例）
-
-**实例一：架构决策。** 近一个月的架构决策——Hermes 退役、roadmap、history、v3 的 Root 形态
-变更——全部产生在 Claude 项目的对话中，从未进入 git。直到一次仓库审核才发现。
-
-代价：当时仓库里没有任何记录说 Pi Supervisor 被废弃，因此 `ARCHITECTURE.md` §6.6 / §7.4 的
-"保留空间"曾是仓库对该话题的唯一表述。任何只读仓库的 agent 都会把它当作待实现项，且无从
-纠正。（该缺口已随 v3 迁移关闭：本文档、`ROADMAP.md` 与 ADR-006 入库，`ARCHITECTURE.md`
-§6.6 / §7.4 的 live 描述删除。）
-
-**实例二：本机配置。** GUI autostart 与看门狗的三个配置文件只存在于 Desktop 的文件系统里。
-而它们在建立当天就出现了一次 bug（`grep` 匹配漏了冒号后的空格，导致每 5 分钟误报重开）
-并需要迭代——**会出错、需要版本管理的东西，尤其不该只存一份在机器上**。现已入库
-`infra/desktop/`。
-
-**违反的规则**：
-
-> `AGENTS.md`：Important project knowledge must not live only inside an agent session.
-> `ARCHITECTURE.md` §9：项目知识与任务记忆必须进入 repository / GitHub。
-
-**这不是「忘了 commit」。** 它是 Layer E 晋升为纯手工流程的必然结果——`ROADMAP.md` P1-D
-早已写明「实际运行中不会有人主动想起来沉淀」。这是该预测的头两个实例，而被预测中的正是
-这套架构文档本身与支撑它运行的配置。
-
-**处置**：P1-D 优先级提高，交付物新增一项——**讨论产物与本机配置落库成为固定动作**，与五行
-收尾记录同级。
-
-**留在这里的理由**：本条不是废弃设计，但它满足本文档的判据——它能阻止未来的人重犯同一个
-错误。
+2026-08-27 的审核发现，架构讨论与会变动的本机配置曾只存在于会话或机器中，导致仓库
+仍把已否决的 Pi Supervisor 当作可选方向，也无法追踪配置修复。后来将记录与配置纳入 Git；
+配置所属的旧 runtime 再退役时，通过 Git history 保留出处，而非继续维持活跃副本。
+教训是让有持久价值的决策与证据可追溯，不把会话存活、终端画面或口头总结当作项目记录。

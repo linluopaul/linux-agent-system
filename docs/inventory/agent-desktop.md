@@ -1,8 +1,15 @@
 # Node Inventory: `agent-desktop`
 
-This report contains stable node attributes only. It intentionally omits collection timestamps,
-resource utilization, interface state, and dynamically assigned IP addresses so repeated collection
-against the same node configuration produces the same content.
+- **Node:** `agent-desktop`
+- **Purpose:** operational inventory snapshot
+- **Verified at:** 2026-09-10
+
+This is a **snapshot**, not permanent truth. Volatile fields — kernel, software versions,
+driver versions, free space, interface addresses — change over time. Re-collect them rather
+than treating this document as a live source. Node topology and access boundaries live in
+`docs/NODES.md`; operational procedures live in `docs/runbooks/REMOTE_WORK.md`.
+
+Dynamically assigned IP addresses and resource utilization are intentionally omitted.
 
 ## System
 
@@ -11,7 +18,7 @@ against the same node configuration produces the same content.
 | Hostname | `agent-desktop` |
 | Operating system | Ubuntu 24.04.4 LTS |
 | OS version | `24.04` |
-| Kernel | `7.0.0-29-generic` |
+| Kernel | `7.0.0-30-generic` (volatile) |
 | Architecture | `x86_64` |
 
 ## CPU
@@ -64,16 +71,26 @@ Loop devices are excluded.
 
 ## Installed Harnesses and Tools
 
-| Requested name | Status | Installed version | Executable |
-| --- | --- | --- | --- |
-| Claude | Installed | Claude Code `2.1.236` | `/home/linluozhiyu/.local/share/claude/versions/2.1.236` |
-| Codex | Installed | `codex-cli 0.147.0` | `/home/linluozhiyu/.codex/packages/standalone/releases/0.147.0-x86_64-unknown-linux-musl/bin/codex` |
-| Pi | Installed | `0.84.2` | `/home/linluozhiyu/.nvm/versions/node/v24.19.0/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js` |
-| Orca | Installed | `orca-ide 1.4.184` (`amd64`) | `/opt/Orca/resources/bin/orca-ide` |
-| restic | Installed | `0.16.4` (Go 1.22.2, linux/amd64) | `/usr/bin/restic` |
+Versions are volatile; re-collect before relying on them.
 
-`/usr/bin/orca` version 46.1 is the GNOME Orca screen reader and is not counted as the Orca
-agent harness.
+| Tool | Version (verified) | Executable |
+| --- | --- | --- |
+| Herdr | `herdr 0.8.2` | `/home/linluozhiyu/.local/bin/herdr` |
+| Claude Code | `2.1.252 (Claude Code)` | `/home/linluozhiyu/.local/bin/claude` |
+| Codex CLI | `codex-cli 0.153.4` | `/home/linluozhiyu/.local/bin/codex` |
+| Git | `git version 2.43.0` | `/usr/bin/git` |
+| Python | `Python 3.12.3` | `/usr/bin/python3` |
+| restic | `restic 0.16.4 compiled with go1.22.2 on linux/amd64` | `/usr/bin/restic` |
+| Pi | `0.84.2` | `/home/linluozhiyu/.nvm/versions/node/v24.19.0/bin/pi` |
+
+### Orca
+
+- **Orca IDE application binary: retained.** Not part of the current Linux Agent System
+  runtime. Executable resolves via `/home/linluozhiyu/.local/bin/orca-ide`.
+- **Legacy project-Orca runtime and persistence: retired** — watchdog, autostart entry,
+  headless server unit, daemon process and PATH wrapper are all gone.
+- `/usr/bin/orca` is the **GNOME Orca Screen Reader**, a separate product unrelated to the legacy
+  project Orca IDE runtime. It was never modified.
 
 ## Collection Sources
 
@@ -82,5 +99,5 @@ agent harness.
 - GPU: `lspci -nnk`
 - Disk: `lsblk` with loop devices excluded
 - Network: `/sys/class/net`, `ip link`
-- Harnesses and tools: executable resolution plus each tool's version output; Orca package
-  version from the installed `orca-ide` Debian package metadata
+- Harnesses and tools: `command -v` executable resolution plus each tool's own
+  `--version` output, collected read-only at the verified-at date above

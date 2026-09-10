@@ -1,5 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Orca IDE
-Exec=orca-ide open
-X-GNOME-Autostart-enabled=true
