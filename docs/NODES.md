@@ -17,8 +17,7 @@
 | Travel Laptop | `llenovo`（Windows） | 瘦客户端。只做远程接入，不本地化仓库、不安装 harness |
 | 手机 | `iphone173`（iOS） | 移动监督与接管。只读查看与会话接管 |
 
-Desktop 之外的节点均不承载计算。**不要把某个 harness 或 model 固定到某个节点**——节点是
-物理位置，harness 选择属于策略。
+Desktop 之外的节点不承担常规计算；节点是物理位置，harness/model 选择属于策略。
 
 ## 运行时
 
@@ -38,25 +37,27 @@ Desktop 上由 **Herdr** 作为跨 harness 的 runtime substrate，在需要编�
 
 网络层由 **Tailscale** 承载；局域网 SSH 是保留的独立恢复路径（见下）。
 
-## 网络暴露面
+## 网络暴露面（记录的配置，使用前复核）
 
-`ufw` 默认策略：**deny (incoming) / allow (outgoing)**。绑在通配地址的服务与其**实际**可达范围：
+以下是已有运行记录中的配置与预期边界，不是实时探测结果。服务、绑定、路由及防火墙
+可能变化；操作前通过 live inspection 核实。机器版本和采集来源见 `docs/inventory/agent-desktop.md`。
+记录的 `ufw` 默认策略为 **deny (incoming) / allow (outgoing)**：
 
-| 端口 | 服务 | 绑定 | ufw 规则 | 实际可达 |
+| 端口 | 服务 | 绑定 | ufw 规则 | 记录配置下的预期边界 |
 |---|---|---|---|---|
 | 22 | sshd | `0.0.0.0` + `[::]` | `ALLOW IN Anywhere` | **本地网段任意主机** + tailnet |
 | 3389 | gnome-remote-desktop | `*` | `ALLOW on tailscale0`，其余 `DENY` | 仅 tailnet |
 | 1053 | verge-mihomo DNS（TCP+UDP） | `*` | 无规则 → 落入 default deny | 仅 loopback |
 | 5900 | x11vnc | `127.0.0.1` | 不需要 | 仅 loopback（经 `tailscale serve` 反代） |
 
-- 路由器**无端口转发**；未使用 `tailscale funnel`。
-- `1053` 虽双栈通配监听且以 root 运行，但无 allow 规则，外部（含 tailnet）不可达。
+- 记录时路由器无端口转发，未使用 `tailscale funnel`；不要据此推断实时公网暴露面。
+- `1053` 的外部阻断依赖防火墙生效；通配监听本身不提供隔离。
 
 ### 22/tcp 未限制到 tailnet —— 有意保留
 
-这是唯一未收紧到 `tailscale0` 的入站端口。**保留而非收紧**，理由：
+访问设计保留局域网 SSH 恢复路径，理由：
 
-- sshd 已 key-only、`PermitRootLogin no`、`PasswordAuthentication no`，局域网暴露风险低；
+- 该边界依赖 key-only、`PermitRootLogin no`、`PasswordAuthentication no`，使用前核实；
 - 收紧后将失去一条真实恢复路径——**Tailscale 自身故障、但机器还活着、家里有人**时，
   从局域网 SSH 进去修。出行期间确实用到过家人协助。
 
@@ -76,7 +77,7 @@ Desktop 上由 **Herdr** 作为跨 harness 的 runtime substrate，在需要编�
 
 ## 关键运行依赖
 
-**代理（Clash Verge）是硬依赖。** 环境变量需在三处注入，改动后相关进程需重启才会生效：
+记录的运行环境依赖代理（Clash Verge）。排查时检查下列环境来源；变更后需确认进程实际继承值：
 
 | 作用域 | 注入点 |
 |---|---|

@@ -7,6 +7,10 @@ Load before delegating or performing work that writes to a repository.
 Start from an **explicit, immutable base commit** and record it. The delivered result must be
 an identifiable, verified commit or an equivalent immutable integration unit.
 
+Before any edit or other Git mutation, the writable delegated unit verifies actual HEAD
+and Git provenance against the declared immutable base. A requested base or runtime label
+is not proof. Stop on missing or mismatched evidence; do not mutate to manufacture a match.
+
 Orchestration lineage is **not** Git ancestry. Never infer that a result descends from a base
 because the runtime says the child came from the parent; verify ancestry in Git.
 
@@ -36,6 +40,14 @@ safely, escalate rather than forcing the reuse.
 The **Lead owns verified integration**. Integrate deliberately, verify ancestry, scope and
 linearity against the declared base, and record the provenance of what was integrated.
 
+Before integration, verify the target checkout is clean and suitable for the intended
+operation. Stop if unrelated dirty state or an unfinished Git operation makes integration
+unsafe; do not silently integrate over it.
+
+After integration, the Lead verifies the integrated result against acceptance and checks
+relevant interactions with the target state, including previously integrated results.
+An integration command completing successfully is not verification of the result.
+
 ## Herdr runtime safety
 
 - Every Herdr mutation must **explicitly target the intended session** (`--session <name>`).
@@ -47,6 +59,16 @@ linearity against the declared base, and record the provenance of what was integ
 
 Whoever creates a direct child runtime resource owns its normal lifecycle and cleanup; the
 parent verifies final state.
+
+Before cleaning or deleting writable delegated resources, preserve recoverable, immutable
+evidence outside the resources being removed:
+
+- the result and its commit or equivalent integration unit;
+- the declared base, verified provenance and relationship to the integrated result;
+- verification outcomes, including integrated-state checks.
+
+Root and Lead must be able to recover and audit this evidence after runtime cleanup.
+Runtime output alone is insufficient if cleanup destroys it.
 
 - A dirty worktree must be resolved before normal cleanup. Normal removal is expected to
   refuse a dirty worktree — that refusal is the safety property, not an obstacle.

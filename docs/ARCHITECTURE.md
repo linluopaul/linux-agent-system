@@ -1,41 +1,23 @@
 # Linux Agent System — Architecture (V4)
 
-Current architecture only. This document defines the cognitive responsibility structure and
-the boundaries around it. It is not a runtime manual, a roadmap, a project-state record, a
-historical narrative, or a provider preference table.
+Current cognitive responsibilities and boundaries. Operational procedures, policy, project
+state, roadmap and historical narrative have separate canonical homes.
 
 Decision of record: `docs/decisions/ADR-008-v4-cognitive-architecture-and-herdr-runtime.md`.
 
 ## 1. System boundary
 
-```text
-                         HUMAN
-                           │
-                           ▼
-                         ROOT
-              owns outcome / acceptance / decisions
-                    │              │
-                    ▼              ▼
-                  LEAD         CHILD ROOT
-        implementation / verification   │
-             │          │               └─ recursively the same structure
-             ▼          ▼
-         DELEGATE    REVIEWER
-```
-
-There are **exactly four cognitive roles**: Root, Lead, Delegate, Reviewer. Human authority
-sits outside and above them. A **Child Root is the Root role applied recursively**, not a
-fifth role.
+Human authority sits above exactly four cognitive roles: Root, Lead, Delegate, Reviewer.
+Root assigns Lead tasks or Child Roots; Leads may use Delegates and Reviewers.
+A Child Root is the Root role applied recursively, not a fifth role.
 
 ## 2. Responsibility
 
-**Root** owns exactly one outcome: requirement clarification, goal, acceptance and
-constraints, architecture and boundary decisions, decomposition into Lead tasks or Child
-Roots, and the final accept / return / escalate decision.
+**Root** owns one outcome: goal, acceptance, constraints, decisions, decomposition into
+Lead tasks or Child Roots, and final accept / return / escalate.
 
-**Lead** owns engineering execution and verification for one assigned task: implementation,
-debugging, tests, the review/fix loop when review is required, the decision whether to work
-directly or delegate, and normal cleanup of the runtime children it creates.
+**Lead** owns engineering execution and verification for one task: implementation, debugging,
+tests, the review/fix loop, direct/delegated execution and cleanup of its runtime children.
 
 **Delegate** performs bounded execution and context offload. It produces a result for its
 parent. It does not own the parent outcome and does not redefine acceptance.
@@ -58,30 +40,22 @@ Classification is by responsibility, never by task size, duration or lifecycle l
 When a result must be retained but the execution process does not need to remain in the
 parent context, delegation is the default.
 
-The parent performs the work directly only when:
+Direct execution is reserved for decision-relevant process, essential implicit context,
+excessive delegation overhead, or nondelegable authority. Deterministic batch work prefers
+scripts, tools or engines over LLM Agents.
 
-1. the execution process materially affects later parent decisions;
-2. continuous access to implicit parent context is required;
-3. delegation overhead exceeds the size of the task;
-4. the required authority cannot be delegated.
-
-For deterministic batch work, prefer a script, tool or engine over an LLM Agent.
-
-A harness-native subagent is preferred where it is adequate for the task and sufficiently
-traceable. An external Herdr Delegate is retained for cross-provider execution, a
-specialized or domestic model unreachable from the parent harness, a data source the parent
-harness cannot reach, an independent runtime, or stronger isolation or traceability.
+Native subagents are preferred when adequate and traceable. External Herdr Delegates serve
+cross-provider or otherwise unavailable capabilities, independent runtimes, and stronger
+isolation or traceability. Selection and execution belong to
+`.agent/procedures/delegate.md`.
 
 ## 5. Stable identity
 
-```text
-ROOT_ID     stable, immutable architectural identity
-TREE_PATH   mutable human-readable hierarchy / presentation
-```
+`ROOT_ID` is stable, immutable architectural identity.
+`TREE_PATH` is mutable human-readable hierarchy / presentation.
 
-`ROOT_ID` is assigned once and never changes. It is **not** a Herdr session, workspace, tab,
-pane or process identity, not a harness identity, and not any human-visible label. All of
-those may change while `ROOT_ID` does not.
+`ROOT_ID` is assigned once and never changes. Runtime session/workspace/tab/pane/process,
+harness and human-visible label identities may change independently; none is `ROOT_ID`.
 
 ## 6. Minimal Task Contract
 
@@ -93,8 +67,7 @@ OVERRIDES   (optional; only when deviating from defaults)
 ```
 
 Policy derives execution route, whether review is required, review route, human gates,
-capability envelope and retry budget. No normal task requires a Human or a Root to carry a
-large hand-written packet of execution metadata.
+capability envelope and retry budget; normal tasks do not carry hand-written execution packets.
 
 ## 7. Communication contract
 
@@ -111,10 +84,9 @@ ARTIFACT
 
 Writable work adds `COMMIT`.
 
-Raw execution process, transcripts and high-volume tool output are never promoted into the
-parent context. They stay in artifacts; the parent receives decision-relevant result,
-evidence, uncertainty and artifact pointers. Uncertainty is stated explicitly whenever the
-evidence is insufficient for a stronger decision.
+Execution process, transcripts and high-volume output stay in artifacts. Parent context
+receives decision-relevant results, evidence, uncertainty and pointers, never reasoning
+dumps. Uncertainty is explicit whenever evidence is insufficient for a stronger decision.
 
 ## 8. Escalation
 
@@ -140,20 +112,16 @@ One escalation asks one concrete question.
 
 Independent review is performed by a **fresh, context-isolated Reviewer**.
 
-The Reviewer receives only the minimal review material: goal, acceptance, the result or diff
-or commit, verification evidence, and the relevant constraints and material selected by Root
-or policy. It does not receive Root advocacy for the implementation, implementer
-chain-of-thought, or irrelevant transcripts.
+Review context is minimal and excludes implementation advocacy and irrelevant execution
+history. The original verdict must remain independently recoverable by Root; Lead may
+respond to findings but cannot rewrite, suppress or redefine that verdict.
 
-The Reviewer returns a concise verdict, an artifact pointer, and integrity evidence. The
-original verdict is preserved independently: the Lead may respond to findings but may not
-rewrite, suppress or redefine the verdict, and the Root must be able to recover the original
-verdict without the Lead as sole transport.
+Lead owns the review/fix loop. Policy owns whether review is required, eligible review
+routing and the retry budget. `.agent/procedures/review.md` owns the review material,
+artifact and integrity procedure.
 
-The Lead owns the review/fix loop. The retry budget belongs to policy.
-
-Context isolation between roles is **contractual** and is sufficient by default. An
-operating-system or filesystem sandbox is introduced only if future evidence justifies it.
+Context isolation is contractual and sufficient by default. Stronger operating-system or
+filesystem sandboxing requires evidence of need.
 
 ## 10. Context continuation
 
@@ -165,38 +133,27 @@ session continuity        Context Checkpoint
 durable project knowledge Git / GitHub  (authoritative)
 ```
 
-There is no Memory Agent. The Context Checkpoint has exactly ten fields:
-
-```text
-ROOT_ID
-CHECKPOINT_GENERATION / TIMESTAMP
-GOAL
-ACCEPTANCE
-CURRENT_STATE
-DECISIONS_MADE
-OPEN_QUESTIONS / BLOCKERS
-ACTIVE_CHILD_ROOTS / LEADS
-IMPORTANT_EVIDENCE_POINTERS
-NEXT_ACTION
-```
-
-No eleventh field is added. Each `ACCEPTANCE` criterion carries its current status and an
-evidence pointer, so a resuming Root can determine acceptance coverage.
+Context Checkpoint is session-independent continuation state, not a competing knowledge
+store. Its fixed architectural contract has exactly ten fields, including acceptance
+coverage with status and evidence. The schema and operational instructions belong to
+`.agent/procedures/checkpoint.md`; no eleventh field is added.
 
 A fresh session or carrier resumes with the same `ROOT_ID`, the latest checkpoint, and
-Git/GitHub durable state as needed.
+Git/GitHub durable state as needed. Continuation never requires conversation transfer.
 
 ## 11. Herdr boundary
 
-Herdr is the cross-harness **runtime substrate**. It provides session and workspace
-lifecycle, runtime launch, worktree lifecycle, human-visible runtime labels, cross-harness
-observability, and resource cleanup.
+Herdr is the cross-harness runtime substrate: session/workspace lifecycle, runtime launch,
+worktrees, human-visible labels, observability and resource cleanup.
 
-Herdr is not a cognitive Agent and not a reasoning supervisor. Its workspace, tab, pane,
-session and process objects are implementation details, never cognitive roles. Command
-syntax and label conventions belong to procedures and runtime conventions, not here.
+Herdr is not a cognitive Agent and not a reasoning supervisor. Its objects are implementation
+details, never cognitive roles. Commands and labels belong to procedures/runtime conventions.
 
-## 12. Lifecycle
+## 12. Writable work and lifecycle
+
+Writable delegated work preserves immutable base/provenance, protected checkout isolation
+and Lead-owned verified integration. Orchestration lineage is not Git ancestry.
+`.agent/procedures/writable-work.md` owns the checks and integration/cleanup procedure.
 
 Whoever creates a direct child runtime resource owns its normal lifecycle and cleanup; the
 parent verifies final state.
@@ -208,22 +165,22 @@ explicitly handled.
 
 ## 13. Policy boundary
 
-Policy owns routing, the review requirement, the review route, human gates, the capability
-envelope and the retry budget. A mandatory safeguard may be strengthened by Root or Human,
-but never silently weakened.
+`.agent/policy.yaml` owns routing, the review requirement, the review route, human gates,
+the capability envelope, retry budget and efficiency/reasoning constraints. A mandatory
+safeguard may be strengthened by Root or Human, but never silently weakened.
 
 No role is permanently bound to a harness, model or provider. Current preferences are
 resolved through policy and profile resolution, and are not architectural identity.
+Capability facts live in `.agent/capabilities.md`; load these and procedures only as needed.
 
 ## 14. Git and GitHub
 
 Git and GitHub hold the authoritative durable project knowledge: code, docs, ADRs,
 tests/evals, commits, pull requests and durable outcomes.
 
-GitHub is **not** a mandatory task entry point, and GitHub Issue or Kanban state is not
-architectural task state. Task entry is a Human surface, and may in future be provided by a
-dashboard or router outside this role model. Individual projects may still use Issues, but
-nothing in this architecture depends on them.
+GitHub is not a mandatory task entry point; GitHub Issue or Kanban state is not architectural
+task state. Task entry is a Human surface, optionally through a future dashboard/router.
+Projects may use Issues without making the architecture depend on them.
 
 ## 15. Thin Controller
 
@@ -234,9 +191,8 @@ would carry unacceptable cost or risk. It never becomes a reasoning supervisor.
 ## 16. Project Control Plane boundary
 
 A Project Control Plane may exist as operational software **outside** the V4 cognitive role
-model. It may provide a dashboard, a project registry, a router, profiles, trace,
-maintenance, backup, and Root Carrier switching. `PROJECT_ID` belongs to that operational
-layer.
+model: dashboard, registry, router, profiles, trace, maintenance, backup and Root Carrier
+switching. `PROJECT_ID` belongs to that operational layer.
 
 It introduces no Meta Root, Supervisor, Project Manager Agent, Router Root, Memory Agent,
 Backup Agent, Trace Agent or Runtime Adapter. Its own architecture is not reproduced here.
@@ -247,50 +203,18 @@ The runtime carrier of a Root — harness, model, reasoning effort, session and 
 may change without creating a new Root. `ROOT_ID` remains stable across the change.
 
 Before switching carriers, active direct children, worktrees and outstanding review state
-must be reconciled. A switch must not silently orphan runtime resources. The switch
-procedure itself belongs to runtime procedure, not to this document.
+must be reconciled. A switch must not silently orphan resources; its procedure belongs to runtime.
 
 ## 18. Architectural placement test
 
-A concept belongs in the top-level architecture **only if it changes the distribution of
-responsibility among Human / Root / Lead / Delegate / Reviewer.**
+A concept belongs in the top-level architecture only if it changes responsibility among
+Human / Root / Lead / Delegate / Reviewer. Otherwise it belongs in policy, Herdr/runtime,
+a skill/procedure/runbook, tests, tooling or the Project Control Plane.
 
-Otherwise it belongs in one of:
+## 19. Historical boundary
 
-```text
-Policy
-Herdr / runtime implementation
-Skill / Procedure / Runbook
-tests
-tooling
-Project Control Plane
-```
-
-This is the guardrail that prevents the architecture from re-expanding into the layered,
-runtime-entangled form it previously had.
-
-## 19. Not part of the current architecture
-
-The following are retired as current claims. They remain in ADRs and `docs/HISTORY.md` as
-historical record, and must not be reintroduced here:
-
-- an Orca execution and review plane, and its Run / Task / Dispatch topology;
-- `Worker` and `Platform Steward` as cognitive roles;
-- a large hand-written execution packet as the Root-to-Lead interface;
-- the numbered closed re-entry condition list;
-- a Memory Agent, a Summarizer Agent, or a Hermes-style Supervisor;
-- GitHub Issues as the mandatory task carrier;
-- any special topology placing the Root outside the runtime;
-- provider or model preference treated as architectural identity.
-
-## 20. Procedures
-
-Operational detail is loaded on demand, one procedure at a time:
-
-```text
-.agent/capabilities.md              harness and provider capability facts
-.agent/procedures/delegate.md       delegation decision and Delegate run
-.agent/procedures/writable-work.md  writable base, integration, cleanup
-.agent/procedures/checkpoint.md     checkpoint write and resume
-.agent/procedures/review.md         independent review run
-```
+The following are retired, not current claims: Orca execution/review topology; Worker and
+Platform Steward cognitive roles; giant Execution Packets; the six-condition Root re-entry
+mechanism; Memory/Summarizer Agents and Hermes-style Supervisors; mandatory GitHub
+Issue/Kanban task state; and a special topology placing Root outside the runtime.
+Historical decisions remain in `docs/decisions/` and `docs/HISTORY.md`.

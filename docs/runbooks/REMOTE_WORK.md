@@ -13,12 +13,10 @@ claude --remote-control     # 想让手机接管这个会话时这样起（--res
 **要图形界面**：`mstsc /v:agent-desktop`（Windows 自带，连接前在「显示」标签调分辨率）。
 **移动中**：手机上接管已用 `--remote-control` 起的终端会话。
 
-## 工作路径
+## 工作前检查
 
-1. 远程进入 Desktop；
-2. 在目标项目的 checkout 或 worktree 内工作；
-3. 需要运行时编排时，用 Herdr 作为跨 harness 的 runtime substrate；
-4. 按 V4 的 Root / Lead / Delegate / Reviewer 模型推进。
+进入目标项目 checkout/worktree，核实 Git 与 Herdr 状态。先查 `.agent/policy.yaml` 的
+`operating_profiles.active` 及对应 profile、`human_gates`；权限与限制以 policy 为准。
 
 ## Herdr 定位安全（必守）
 
@@ -43,27 +41,22 @@ checkpoint 恢复；不要凭断线前的印象直接续做。
 
 先分清是哪一层，别盲查：
 
-| 现象 | 结论 | 下一步 |
+| 现象 | 优先排查 | 下一步 |
 |---|---|---|
-| **RDP 不通，`ssh desktop` 通** | 图形层问题，**不是网络** | 见下方「RDP 黑屏 / 闪退」 |
-| **SSH 与 RDP 同时不通** | 网络层 | 查 Tailscale：本机 app 是否 Connected；`tailscale status` 看 Desktop 在不在线 |
+| **RDP 不通，`ssh desktop` 通** | 图形服务或 RDP 路径 | 见下方「RDP 黑屏 / 闪退」 |
+| **SSH 与 RDP 同时不通** | 网络、服务或主机状态 | 查 Tailscale：本机 app 是否 Connected；`tailscale status` 看 Desktop 在不在线 |
 | **仅 SSH 拒绝** | sshd 或 key 问题 | 用 RDP / 向日葵进去查 `systemctl status ssh` |
-| **全都不通** | 机器无响应 | 向日葵（走云中继，独立于 tailnet）；仍不通则**无法远程恢复，等待返回**，不要无限重试 |
+| **全都不通** | 远程通道或主机不可用 | 向日葵（走云中继，独立于 tailnet）；仍不通则**无法远程恢复，等待返回**，不要无限重试 |
 
-**RDP 黑屏 / 一连上就闪退**——几乎都是显示器问题（Desktop Sharing 抓的是物理显示器）：
+**RDP 黑屏 / 闪退**：先检查物理显示器连接（Desktop Sharing 依赖该显示源）：
 
 ```bash
 ssh desktop
 export DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority
-xrandr --query | grep -E "connected"      # 全是 disconnected → 显示器断电，需有人开机
-gnome-shell --replace &                    # 显示器已接回但仍黑屏 → 合成器没重建，这条修
+xrandr --query | grep -E "connected"      # 若全是 disconnected，请现场确认显示器供电/连接
+# 确认连接恢复且证据指向合成器后，按 policy 的权限/闸门决定是否执行：
+gnome-shell --replace &
 ```
-
-## 出行期风险策略
-
-`.agent/policy.yaml` → `operating_profiles.active`，**当前 = `travel`**：禁止 writable
-delegation；Delegate 只读、只跑测试、只出 patch 建议，集成待返回后做。可介入时改回
-`default`。
 
 ## 其它故障
 
