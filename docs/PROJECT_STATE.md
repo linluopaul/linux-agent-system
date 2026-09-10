@@ -1,117 +1,58 @@
-# 工程现状
+# 工程现状 — V4 最终收缩候选
 
-当前状态快照，不是架构定义、路线图或历史记录。架构见 `docs/ARCHITECTURE.md` 与
-`docs/decisions/`；后续工作见 `docs/ROADMAP.md`；历史与已否决方案见 `docs/HISTORY.md`。
+本文描述本次候选完成文档收口后的状态，不是整个 migration 的最终验收声明。
+架构与职责见 `docs/ARCHITECTURE.md` 和 ADR-008；历史见 `docs/HISTORY.md`；
+剩余工作及运行时 backlog 统一见 `docs/ROADMAP.md`。
 
-## 1. 仓库状态
+## 分支与候选边界
 
-| 项 | 值 |
+| 项 | 状态 |
 |---|---|
-| main checkout | `/home/linluozhiyu/Projects/linux-agent-system` |
-| main HEAD | `d429f2aedd648142d985bbea0a66183a89e923ec` |
-| main 状态 | clean · 与 `origin/main` 0 ahead / 0 behind |
-| V4 migration worktree | `/home/linluozhiyu/.herdr/worktrees/linux-agent-system/architecture-v4-migration` |
-| migration branch | `architecture-v4-migration` |
-| 本文更新前的最后一个实现 checkpoint | `fff7e55a45b94a728a23fe49e6ce577f3f850342` — `runtime: retire tracked Orca surfaces`（Batch F1） |
+| 当前工作分支 | `v4-clean-rebuild-codex` |
+| 当前 worktree | `/home/linluozhiyu/.herdr/worktrees/linux-agent-system/v4-clean-rebuild-codex` |
+| 冻结参考 | `architecture-v4-migration`，仅作既有迁移证据 |
+| main | 尚未合入 V4；本次候选没有修改 main |
+| Root carrier | Codex；没有可核验模型身份依据时，不声称已确认 Astra |
 
-**migration 尚未 merge 进 main，该 branch 也尚未 push。** main 上仍是 V3 内容；V4 只存在于
-migration branch。main 的 HEAD 不受 migration commit 影响，故上表中的 main HEAD 是稳定值。
-
-migration branch 的**实时** HEAD 与领先数不写在本文中——本文自身的 commit 会立刻使这类数值
-失效。需要时从 Git 取权威值：
+实时 HEAD、index、工作区和远端状态以 Git 为准，本文不记录自身 current commit SHA
+或动态 ahead count，也不根据一次本地检查推断远端同步状态：
 
 ```bash
-git rev-parse HEAD                                   # 实时 migration HEAD
-git rev-list --count main..architecture-v4-migration # 实时领先数
+git branch --show-current
+git rev-parse HEAD
+git status --short
 ```
 
-历史 checkpoint：在本状态文档更新之前，migration branch 上已有六个完成的 migration commit，
-截至 Batch F1。该数字是历史记录，不是实时计数。
+## 已形成的候选
 
-## 2. 当前架构（摘要）
+本次最终收缩候选有 **27 个 tracked files**，按文件计数，不把目录计入。
+Batch 1 的规范面收缩已提交；本次 Batch 2 已形成 HISTORY、PROJECT_STATE、ROADMAP 的
+文档收口候选。两批次取代原 G2/G3 分步收尾计划，后者不再是待执行任务。
 
-四个认知角色：**Root · Lead · Delegate · Reviewer**；Child Root 是递归的 Root，不是第五角色。
-Herdr 是跨 harness 的 runtime substrate。Git/GitHub 是权威的持久项目知识。
+- 当前规范面与按需 procedures 职责已收缩；policy 保持执行元数据的归属。
+- Writable-work 已补齐实际 base/provenance 核验、集成状态与交互验证、清理前可恢复证据。
+- 旧 Issue task scaffold 和空占位文件已移除，ADR-001…008 原文保留。
+- 历史主张已恢复时间语境；运行时 backlog 与未来工作台需求集中到 ROADMAP。
 
-完整定义见 `docs/ARCHITECTURE.md`、`docs/decisions/ADR-008-v4-cognitive-architecture-and-herdr-runtime.md`
-与 `AGENTS.md`。本文不复制架构条款。
+## 验证结果与证据边界
 
-## 3. 当前 Agent surface
+本次候选的 canonical suite：**17 tests，OK**。这是候选验证记录，不是架构固定测试数。
+范围包括四角色及 policy、独立 review、checkpoint、delegation、writable-work 安全、
+provider/harness binding、canonical references，以及依赖或 Git 枚举失败时显式报错。
+正负 synthetic controls 检查 guards 能否拒绝缺失或弱化的声明。
 
-migration branch 上 committed 的 `.agent` surface 恰为六项：
+这些结果证明的是**仓库声明检查通过**，不能替代真实 runtime 接口或恢复行为的实测。
+既有 Herdr 实测结论及未闭合边界见
+`docs/decisions/ADR-008-v4-cognitive-architecture-and-herdr-runtime.md`；本次没有新增机器实测。
 
-```text
-.agent/policy.yaml
-.agent/capabilities.md
-.agent/procedures/checkpoint.md
-.agent/procedures/delegate.md
-.agent/procedures/review.md
-.agent/procedures/writable-work.md
-```
+## Runtime 退役记录
 
-`.agent/roles/`、`.agent/policies/`、`.agent/harnesses/`、`.agent/providers/`、`.agent/skills/`
-**已不再是 current tracked surface**，其仍有效的语义已迁入上述六个文件。
+旧项目 Orca runtime 及 persistence 已退役；保留应用本体与未触碰的 GNOME 屏幕阅读器
+不属于该 runtime。已有记录见 `docs/inventory/agent-desktop.md`，不在此重复清理过程。
 
-## 4. 验证状态
+## 尚未完成的闭环
 
-architecture-policy suite：**34 tests，OK**。这是当前 migration checkpoint 的数值，不是架构层
-的固定值；测试数会随后续批次变化。
-
-已闭合的关键结论：
-
-- V4 规范面为 current，V3 规范面已从 active tree 移除；
-- provider / model / harness 不等于 cognitive role identity；
-- review trigger 有单一 canonical policy ownership（`policy.review`）；
-- routing 只决定 HOW，不决定 WHETHER，且不得削弱 mandatory review；
-- role→harness guard 具备 synthetic positive control，不依赖仓库中恰好存在非法声明；
-- writable-work worktree reuse safety 已保留到 canonical procedure；
-- tracked Orca runtime surface 已退役。
-
-## 5. Orca 退役状态
-
-| 层 | 状态 |
-|---|---|
-| repository Orca runtime | RETIRED |
-| watchdog / autostart persistence | RETIRED |
-| headless server（`orca-serve.service`） | RETIRED |
-| legacy active Orca daemon | RETIRED |
-| external persistence `resources_clean` | TRUE |
-| `orca-ide` application binary | **保留**（`~/.local/bin/orca-ide` → `/opt/Orca/`） |
-| GNOME Orca 屏幕阅读器（`/usr/bin/orca`） | **未触碰** |
-
-注意两点：Orca **应用本体未卸载**，未来若需要仍可重新配置；机器上的 GNOME Orca 屏幕阅读器
-与本项目的 Orca 是**同名但不同的两个程序**，不得混为一谈。
-
-## 6. 尚未完成的 migration 工作
-
-G1 PROJECT_STATE / ROADMAP 收敛已由本次文档更新完成。仍未完成的是：
-
-- **G2** NODES / runtime 文档收敛
-- **G3** HISTORY 最终迁移记录 + 过时 task-entry surface（GitHub Issue template）退役
-- 最终 repository contraction 审计
-- 独立 Reviewer 复核
-- merge / push 决策
-- merge 后验证
-
-## 7. 运行时验证 backlog（非 migration blocker）
-
-- S4 人工审批 / permission 语义
-- Herdr 缺少结构化的 child→parent 结果通道
-- server cold-recovery 未验证
-- trust-dialog / `blocked` 状态语义
-- base-checkout workspace 生命周期行为
-- 各 harness 的 native-subagent 能力未在仓库证据中确认
-
-这些是**运行时 backlog**，不构成 migration 阻塞，也**不应据此扩张 V4 cognitive architecture**。
-在没有直接证据前不要就其行为下结论。
-
-## 8. 当前权威顺序
-
-```text
-1. live Git / GitHub / CI
-2. current V4 ADR 与 canonical docs
-3. 已验证的 runtime evidence
-4. historical ADR / HISTORY
-```
-
-冻结期的外部文档包不作为仓库的长期运行依赖。
+最终候选的独立复核尚未启动；其 findings 处理、文档收口提交、push/PR/merge 决策与执行、
+合并后验证均未完成。Batch 1 的局部 review 不等于最终候选的整体验收。
+本地文档与测试收口不意味着 V4 migration 已验收，也不意味着未来工作台已经实现。
+运行时待验证事项只在 `docs/ROADMAP.md` 集中维护；外部旧规格包不是运行依赖。
