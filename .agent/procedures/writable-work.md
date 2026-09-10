@@ -35,6 +35,16 @@ result branch merely to make it match the requested base.** Create or use a fres
 worktree and a fresh result branch from the declared base instead; if that cannot be done
 safely, escalate rather than forcing the reuse.
 
+## Ownership after Lead failure
+
+A clean `git status` proves only a clean worktree, not that no Agent is using it.
+Before reusing a writable workspace after Lead failure, the replacement must confirm
+the previous executor has exited or an explicit ownership transfer has completed,
+ending the previous executor's write authority. Old and new executors must not have
+concurrent write authority over the same workspace. Clean status alone is insufficient.
+If ownership cannot be confirmed, escalate to the owning Root; do not terminate unknown
+processes, reset branches or force takeover.
+
 ## Integration
 
 The **Lead owns verified integration**. Integrate deliberately, verify ancestry, scope and

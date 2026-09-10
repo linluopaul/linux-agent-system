@@ -325,6 +325,21 @@ class ArchitecturePolicyTests(unittest.TestCase):
         self.assertEqual("deferred_until_operator_returns", travel["integration"])
         self.assertNotRegex(read("docs/runbooks/REMOTE_WORK.md"), r"当前\s*=\s*`?travel")
 
+    def test_credential_handling_and_delegate_write_boundary(self):
+        policy = load_policy()
+        credentials = policy["human_gates"].get("credential_handling", {})
+        self.assertLessEqual({"git", "messages", "terminal_logs", "review_artifacts"},
+                             set(credentials.get("forbidden_value_destinations", [])))
+        self.assertEqual(["environment_variables", "gitignored_env_file", "os_keyring", "controlled_secret_manager"],
+                         credentials.get("local_storage"))
+        self.assertEqual("task_required_least_privilege", credentials.get("per_node_access"))
+        self.assertIs(False, credentials.get("validation_may_read_print_or_copy_real_credentials"))
+        profiles = policy["capabilities"]["profiles"]
+        self.assertIs(False, profiles["delegate-readonly"].get("repository_write"))
+        self.assertIs(True, profiles["delegate-writable"].get("repository_write"))
+        for name in ("delegate-readonly", "delegate-writable"):
+            self.assertEqual({"repo", "git", "python-test"}, set(profiles[name]["includes"]))
+
     def test_efficiency_and_instruction_diet(self):
         efficiency = load_policy()["efficiency"]
         self.assertLessEqual({"use_the_cheapest_capable_resource", "prefer_deterministic_tools_tests_and_evals_before_model_calls",
@@ -414,6 +429,14 @@ class ArchitecturePolicyTests(unittest.TestCase):
                 r"do not reset.*repoint.*retarget", r"fresh isolated worktree.*fresh result branch",
                 r"cannot.*safely.*escalate")
 
+    def test_writable_ownership_handoff(self):
+        ownership = section(read(".agent/procedures/writable-work.md"), "Ownership after Lead failure")
+        require(ownership, r"clean git status.*not that no agent is using it",
+                r"before reusing.*after lead failure.*must confirm.*previous executor has exited or.*explicit ownership transfer has completed",
+                r"ending.*previous executor.*write authority", r"must not have concurrent write authority",
+                r"clean status alone is insufficient", r"cannot be confirmed.*escalate to the owning root",
+                r"do not terminate unknown processes, reset branches or force takeover")
+
     def test_writable_integration_and_recoverable_cleanup(self):
         procedure = read(".agent/procedures/writable-work.md")
         require(section(procedure, "Integration"), r"lead owns verified integration",
@@ -495,6 +518,14 @@ class ArchitecturePolicyTests(unittest.TestCase):
              "observable post-conditions", "command success"),
         ]
         original_read = read
+        for old, new in (
+            ("previous executor has exited", "worktree is clean"),
+            ("an explicit ownership transfer has completed", "a transfer has been requested"),
+            ("must not have\nconcurrent write authority", "may have\nconcurrent write authority"),
+            ("escalate to the owning Root", "proceed without confirmation"),
+            ("do not terminate unknown", "terminate unknown"),
+        ):
+            cases.append(("test_writable_ownership_handoff", ".agent/procedures/writable-work.md", old, new))
         for method, path, old, new in cases:
             with self.subTest(method=method, defect=old):
                 original = original_read(path)
@@ -522,6 +553,20 @@ class ArchitecturePolicyTests(unittest.TestCase):
             ("test_human_gates_capabilities_and_profiles", ("capabilities", "profiles", "delegate-writable", "includes"),
              ["repo", "git", "delegate-integration"]),
         ]
+        guard = "test_credential_handling_and_delegate_write_boundary"
+        credential_path = ("human_gates", "credential_handling")
+        destinations = ["git", "messages", "terminal_logs", "review_artifacts"]
+        for forbidden in destinations:
+            cases.append((guard, credential_path + ("forbidden_value_destinations",),
+                          [item for item in destinations if item != forbidden]))
+        cases.extend([
+            (guard, credential_path + ("local_storage",), ["tracked_file"]),
+            (guard, credential_path + ("per_node_access",), "unrestricted"),
+            (guard, credential_path + ("validation_may_read_print_or_copy_real_credentials",), True),
+            (guard, ("capabilities", "profiles", "delegate-readonly", "repository_write"), True),
+            (guard, ("capabilities", "profiles", "delegate-readonly", "repository_write"), None),
+            (guard, ("capabilities", "profiles", "delegate-writable", "repository_write"), False),
+        ])
         for method, path, value in cases:
             with self.subTest(path=path):
                 broken = copy.deepcopy(policy)

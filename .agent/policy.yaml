@@ -170,11 +170,13 @@ capabilities:
     tailscale:             {description: Tailscale identity and network state, sensitive: true}
     quantitative-analysis: {description: financial, market-data and quantitative computation, sensitive: true}
 
+  # repository_write narrows every included capability, including git and test tools.
+  # true permits only task-scoped writes; operating-profile restrictions still apply.
   profiles:
     root-standard:        {includes: [repo, git, runtime-control, github]}
     lead-standard:        {includes: [repo, git, python-test, runtime-control, delegate-integration, github]}
-    delegate-readonly:    {includes: [repo, git, python-test]}
-    delegate-writable:    {includes: [repo, git, python-test]}
+    delegate-readonly:    {includes: [repo, git, python-test], repository_write: false}
+    delegate-writable:    {includes: [repo, git, python-test], repository_write: true}
     reviewer-independent: {includes: [repo, git, python-test, github]}
 
 # ----------------------------------------------------------------------------- retry ---
@@ -219,6 +221,11 @@ efficiency:
 human_gates:
   may_be_relaxed_by_agent: false
   proposal_channel: issue_or_pull_request
+  credential_handling:
+    forbidden_value_destinations: [git, messages, terminal_logs, review_artifacts]
+    local_storage: [environment_variables, gitignored_env_file, os_keyring, controlled_secret_manager]
+    per_node_access: task_required_least_privilege
+    validation_may_read_print_or_copy_real_credentials: false
   protected:
     - production_trading_permissions
     - destructive_data_access_restrictions
